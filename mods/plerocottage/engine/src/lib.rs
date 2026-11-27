@@ -9,6 +9,7 @@ mod effects;
 mod enchanting;
 mod flatten;
 mod frond;
+mod furniture;
 mod gecko;
 mod glue;
 mod growth;
@@ -442,8 +443,8 @@ impl Hooks for Plerocottage {
         _host: &mut dyn Host,
         event: &mut BlockEntityEvent<'_>,
     ) -> Option<(String, Compound)> {
-        if mobs::holding(event.block).is_some() {
-            // A nest: it keeps what lies in it, in its slots.
+        if mobs::holding(event.block).is_some() || furniture::of(event.block).is_some() {
+            // A nest, a cabinet, a drawer: it keeps what lies in it, in its slots.
             return Some((event.block.to_owned(), Compound::new()));
         }
         if let Some(kind) = machines::of(event.block) {
@@ -493,6 +494,9 @@ impl Hooks for Plerocottage {
                 slots: nest.size,
                 ..ModContainer::default()
             });
+        }
+        if let Some((_, kind)) = furniture::of(event.block) {
+            return Some(furniture::container(kind));
         }
         if let Some(kind) = machines::of(event.block) {
             return Some(ModContainer {
@@ -620,6 +624,10 @@ impl Hooks for Plerocottage {
     }
 
     fn menu_button(&self, host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+        if let Some((_, kind)) = furniture::of(&event.entity.id) {
+            furniture::pressed(host, kind, &mut event.entity.items, event.id);
+            return;
+        }
         if let Some(kind) = machines::of(&event.entity.id) {
             let shown = kind.spec().screen.as_ref();
             let packets = shown.map(|s| &s.packets[..]).unwrap_or_default();
@@ -675,6 +683,10 @@ impl Hooks for Plerocottage {
             return;
         }
         let block = host.block(event.pos);
+        if let Some((found, _)) = furniture::of(&block) {
+            furniture::opened(host, event.pos, found, open);
+            return;
+        }
         if let Some(kind) = machines::of(&block) {
             if let Some(entity) = host.mod_block_entity(event.pos) {
                 let unit = glue::load(kind, &entity);
@@ -782,6 +794,9 @@ impl Hooks for Plerocottage {
     }
 
     fn screen(&self, _host: &dyn Host, event: &mut ScreenEvent<'_>) -> Option<NativeScreen> {
+        if let Some((_, kind)) = furniture::of(event.block) {
+            return Some(furniture::screen(kind));
+        }
         if let Some(kind) = machines::of(event.block) {
             let spec = kind.spec();
             let shown = spec.screen.as_ref()?;
@@ -821,6 +836,10 @@ impl Hooks for Plerocottage {
     }
 
     fn screen_draw(&self, host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
+        if let Some((_, kind)) = furniture::of(event.block) {
+            furniture::draw(host, event.batch, event.origin, kind);
+            return;
+        }
         if let Some(kind) = machines::of(event.block) {
             if let Some(shown) = &kind.spec().screen {
                 let seen = screen::Seen::of(host, kind.spec(), event.data);
@@ -872,6 +891,9 @@ impl Hooks for Plerocottage {
     fn screen_click(&self, host: &dyn Host, event: &mut ScreenClickEvent<'_>) -> Option<i32> {
         if event.right {
             return None;
+        }
+        if let Some((_, kind)) = furniture::of(event.block) {
+            return furniture::click(kind, event.at);
         }
         if let Some(kind) = machines::of(event.block) {
             let shown = kind.spec().screen.as_ref()?;

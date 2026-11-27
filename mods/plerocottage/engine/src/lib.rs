@@ -18,6 +18,7 @@ mod machines;
 mod mobs;
 mod oven;
 mod placing;
+mod portions;
 mod screen;
 mod shaker;
 mod shared;
@@ -532,6 +533,9 @@ impl Hooks for Plerocottage {
             return Flow::Cancel;
         }
         if host.block(event.pos) == frond::BLOCK && frond::used(host, event.pos, matches!(event.hand, Hand::Main)) {
+            return Flow::Cancel;
+        }
+        if portions::used(host, event.pos, matches!(event.hand, Hand::Main)) {
             return Flow::Cancel;
         }
         if mobs::use_held(host, event.pos, matches!(event.hand, Hand::Main)) {

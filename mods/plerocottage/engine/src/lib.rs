@@ -149,6 +149,24 @@ fn at(pos: [i32; 3]) -> [f64; 3] {
     pos.map(|v| f64::from(v) + 0.5)
 }
 
+const COOKTOP: &str = "plerocottage:cooktop";
+
+/// `CooktopBlock.use`: a click lights the cooktop, or puts it out, and nothing else (what is
+/// in the hand stays there). Lit, it heats the machine above it (`glue::heated`).
+fn use_cooktop(host: &mut dyn Host, pos: [i32; 3]) {
+    let running = host.block_property(pos, "running").as_deref() == Some("true");
+    host.set_block_property(pos, "running", if running { "false" } else { "true" });
+    let dimension = host.dimension();
+    let mut float = || host.level_random(dimension).map_or(0.5, |random| random.next_float());
+    let (sound, volume, pitch) = if running {
+        let (a, b) = (float(), float());
+        ("minecraft:block.fire.extinguish", 0.5, 2.6 + (a - b) * 0.8)
+    } else {
+        ("minecraft:item.flintandsteel.use", 1.0, float() * 0.4 + 0.8)
+    };
+    host.play_sound(sound, at(pos), BLOCKS, volume, pitch);
+}
+
 fn sound(host: &mut dyn Host, pos: [i32; 3], name: &str) {
     host.play_sound(&format!("plerocottage:{name}"), at(pos), BLOCKS, 1.0, 1.0);
 }
@@ -497,6 +515,12 @@ impl Hooks for Plerocottage {
     }
 
     fn right_click_block_v2(&self, host: &mut dyn Host, event: &mut RightClickBlockV2Event) -> Flow {
+        if host.block(event.pos) == COOKTOP {
+            if matches!(event.hand, Hand::Main) {
+                use_cooktop(host, event.pos);
+            }
+            return Flow::Cancel;
+        }
         if host.block(event.pos) == machines::cutting_board::BLOCK
             && glue::use_board(host, event.pos, matches!(event.hand, Hand::Main))
         {

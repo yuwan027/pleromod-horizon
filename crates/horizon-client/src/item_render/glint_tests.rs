@@ -81,6 +81,7 @@ fn state(sprite: &str, foil: FoilType, display: DisplayContext) -> ItemRenderSta
         uses_block_light: false,
         particle: material,
         transforms: Default::default(),
+        oversized: false,
     };
     ItemRenderState {
         display,

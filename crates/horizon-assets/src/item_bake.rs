@@ -29,6 +29,14 @@ impl SpriteMask {
             frames: vec![vec![false; width * height]],
         }
     }
+    /// A picture larger than 16 but not a multiple of it (an 18 by 18 creative tab icon,
+    /// say) is drawn a pixel to a model unit, centred, rather than squeezed into 16:
+    /// its pixels keep the size of every other item's. Multiples of 16 are higher
+    /// resolution textures of a 16 by 16 picture and fill the square as usual.
+    pub fn pixel_sized(&self) -> bool {
+        let odd = |n: usize| n > 16 && n % 16 != 0;
+        odd(self.width) || odd(self.height)
+    }
     fn transparent(&self, frame: usize, x: i64, y: i64) -> bool {
         if x < 0 || y < 0 || x >= self.width as i64 || y >= self.height as i64 {
             return true;
@@ -52,6 +60,9 @@ pub struct BakedItemModel {
     pub particle: Material,
     /// By [`crate::model::DISPLAY_CONTEXTS`]; `None` is `NO_TRANSFORM`.
     pub transforms: [Option<ItemTransform>; 9],
+    /// A generated layer drawn past the 16 by 16 square ([`SpriteMask::pixel_sized`]):
+    /// a slot shows all of it.
+    pub oversized: bool,
 }
 
 fn context_index(context: DisplayContext) -> Option<usize> {
@@ -130,6 +141,7 @@ pub fn bake_resolved(
             }
         }
     };
+    let mut oversized = false;
     let quads = if model.uses_item_generator() {
         let mut quads = Vec::new();
         for (layer, slot) in ["layer0", "layer1", "layer2", "layer3", "layer4"]
@@ -147,6 +159,7 @@ pub fn bake_resolved(
                     .mask(&m.sprite)
                     .unwrap_or_else(|| SpriteMask::opaque(16, 16))
             };
+            oversized |= mask.pixel_sized();
             quads.extend(extrude_layer(&mask, &m, layer as i32)?);
         }
         quads
@@ -188,6 +201,7 @@ pub fn bake_resolved(
         uses_block_light: model.gui_light == GuiLight::Side,
         particle,
         transforms,
+        oversized,
     })
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -221,8 +235,16 @@ impl Side {
 /// client collects the sides in a hash set, so their order is unspecified;
 /// they are emitted sorted by pixel here.
 fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<ModelQuad>> {
-    let from = [0.0, 0.0, 7.5];
-    let to = [16.0, 16.0, 8.5];
+    let (x_scale, y_scale) = if mask.pixel_sized() {
+        (1.0, 1.0)
+    } else {
+        (16.0 / mask.width as f32, 16.0 / mask.height as f32)
+    };
+    // The picture's left and top edges: 0 and 16 for one that fills the square.
+    let left = 8.0 - mask.width as f32 * x_scale / 2.0;
+    let top = 8.0 + mask.height as f32 * y_scale / 2.0;
+    let from = [left, top - mask.height as f32 * y_scale, 7.5];
+    let to = [left + mask.width as f32 * x_scale, top, 8.5];
     let mut quads = vec![
         bake_flat_face(
             from,
@@ -258,8 +280,8 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
             }
         }
     }
-    let x_scale = 16.0 / mask.width as f32;
-    let y_scale = 16.0 / mask.height as f32;
+    // The sides' texture coordinates are over the sprite's 16 units whatever its size.
+    let (u_scale, v_scale) = (16.0 / mask.width as f32, 16.0 / mask.height as f32);
     for (y, x, side) in faces {
         let (x, y) = (x as f32, y as f32);
         let u0 = x + 0.1;
@@ -284,12 +306,10 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
                 end_y += 1.0;
             }
         }
-        start_x *= x_scale;
-        end_x *= x_scale;
-        start_y *= y_scale;
-        end_y *= y_scale;
-        start_y = 16.0 - start_y;
-        end_y = 16.0 - end_y;
+        start_x = left + start_x * x_scale;
+        end_x = left + end_x * x_scale;
+        start_y = top - start_y * y_scale;
+        end_y = top - end_y * y_scale;
         let (from, to) = match side {
             Side::Up => ([start_x, start_y, 7.5], [end_x, start_y, 8.5]),
             Side::Down => ([start_x, end_y, 7.5], [end_x, end_y, 8.5]),
@@ -299,7 +319,7 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
         quads.push(bake_flat_face(
             from,
             to,
-            [u0 * x_scale, v0 * y_scale, u1 * x_scale, v1 * y_scale],
+            [u0 * u_scale, v0 * v_scale, u1 * u_scale, v1 * v_scale],
             side.direction(),
             material.clone(),
             layer,
@@ -389,5 +409,28 @@ mod tests {
         );
         assert_eq!(baked.particle.sprite, "horizon_cit:item/cit");
         assert_eq!(baked.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
+    }    #[test]
+    fn odd_sized_pictures_keep_their_pixel_size() {
+        let material = Material {
+            sprite: "horizon:item/icon".to_owned(),
+            force_translucent: false,
+        };
+        let front = |size| {
+            let mask = SpriteMask::opaque(size, size);
+            let quads = extrude_layer(&mask, &material, 0).unwrap();
+            let xs = quads[0].positions.map(|p| p[0]);
+            let ys = quads[0].positions.map(|p| p[1]);
+            let span = |v: [f32; 4]| (v.iter().copied().fold(f32::MAX, f32::min), v.iter().copied().fold(f32::MIN, f32::max));
+            (span(xs), span(ys), mask.pixel_sized())
+        };
+        let (square, tab, hd) = (front(16), front(18), front(32));
+        // A higher resolution texture fills the square like a 16 by 16 one.
+        assert_eq!(hd, (square.0, square.1, false));
+        // An 18 by 18 icon is 18/16 as wide and tall, about the same centre.
+        assert!(tab.2 && !square.2);
+        for (t, s) in [(tab.0, square.0), (tab.1, square.1)] {
+            assert!(((t.1 - t.0) / (s.1 - s.0) - 18.0 / 16.0).abs() < 1e-5);
+            assert!(((t.0 + t.1) - (s.0 + s.1)).abs() < 1e-5);
+        }
     }
 }

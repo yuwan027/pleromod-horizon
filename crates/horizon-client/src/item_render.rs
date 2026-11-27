@@ -859,6 +859,7 @@ impl ItemRenderer {
                         force_translucent: false,
                     },
                     transforms: Default::default(),
+                    oversized: false,
                 })
             });
         if let Ok(mut cache) = self.baked.lock() {
@@ -926,6 +927,7 @@ impl ItemRenderer {
         };
         let resolved = self.models.resolve(stack, &ctx, env);
         let mut animated = false;
+        let mut oversized = false;
         let layers = resolved
             .layers
             .into_iter()
@@ -959,6 +961,7 @@ impl ItemRenderer {
                 if layer.foil != FoilType::None {
                     animated = true;
                 }
+                oversized |= baked.oversized;
                 LayerRender {
                     geometry,
                     tints: layer.tints,
@@ -973,7 +976,7 @@ impl ItemRenderer {
         ItemRenderState {
             display,
             layers,
-            oversized_in_gui: resolved.oversized_in_gui,
+            oversized_in_gui: resolved.oversized_in_gui || oversized,
             animated,
             cit_glint: None,
             hdr_tier: 0,

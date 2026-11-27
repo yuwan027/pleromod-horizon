@@ -1630,6 +1630,13 @@ impl Game<'_> {
     /// has left. `ContainerOpenersCounter.decrementOpeners` then posts
     /// CONTAINER_CLOSE with that closing guest's context.
     pub(super) fn guest_container_closed(&mut self, host: &mut LanHost, conn: u32) {
+        if super::play_world::active() {
+            Self::play_container_closed(
+                host.hub
+                    .guest(conn)
+                    .and_then(|g| g.menu.as_ref().and_then(|m| m.pos)),
+            );
+        }
         if let Some(g) = host.hub.guest(conn)
             && let Some(pos) = g.menu.as_ref().and_then(|m| m.pos)
             && !g.spectator()
@@ -1880,6 +1887,11 @@ impl Game<'_> {
             return;
         }
         let (uuid, name) = (g.uuid, g.name.clone());
+        // The hub is out of `self.lan` while a packet is handled: what the
+        // player holds is read from this, as they held it when they clicked.
+        let mut stacks = g.inventory.clone();
+        stacks.resize(36, None);
+        let held = (g.carried.clone(), stacks, g.offhand.clone());
         let play = host.play.entry(conn).or_default();
         let mut cancel = false;
         if p.input == 5 {
@@ -1910,6 +1922,9 @@ impl Game<'_> {
             }
         } else {
             play.drag_heard = None;
+            let (carried, stacks, offhand) = held;
+            self.native_click_cursor = Some((uuid, carried));
+            self.native_click_stacks = Some((uuid, stacks, offhand));
             self.native_inventory_click(
                 uuid,
                 &name,
@@ -1919,6 +1934,8 @@ impl Game<'_> {
                 p.input,
                 &mut cancel,
             );
+            self.native_click_cursor = None;
+            self.native_click_stacks = None;
         }
         if cancel {
             (p.slot, p.button, p.input) = (-999, 3 << 2, 5);
@@ -2060,6 +2077,18 @@ impl Game<'_> {
 
     /// A packet from a guest that the hub does not handle itself.
     pub(super) fn lan_guest_packet(&mut self, host: &mut LanHost, conn: u32, packet: S) {
+        // The shared world watches what the player's places, breaks and toggles change.
+        match self.play_before(host, conn, &packet) {
+            super::play_world::Before::Pass => self.lan_guest_packet_inner(host, conn, packet),
+            super::play_world::Before::Refused => {}
+            super::play_world::Before::Capture(capture) => {
+                self.lan_guest_packet_inner(host, conn, packet);
+                self.play_after(host, conn, capture);
+            }
+        }
+    }
+
+    fn lan_guest_packet_inner(&mut self, host: &mut LanHost, conn: u32, packet: S) {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };

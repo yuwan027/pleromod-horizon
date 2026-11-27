@@ -462,6 +462,40 @@ impl Game<'_> {
     pub(super) fn glint(&self) -> Option<item_render::Glint> {
         self.glint_frame.glint(0.5)
     }
+    /// `native_item_submit`: whether a mod drew `stack` itself, held in
+    /// `display` under `pose` (camera-relative) at `light`, in place of its
+    /// model. What it drew is on `out`.
+    pub(super) fn item_drawn_by_mod(
+        &self,
+        stack: &ItemStack,
+        display: DisplayContext,
+        partial: f32,
+        pose: glam::Mat4,
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) -> bool {
+        // Minecraft's own items are the game's to draw.
+        if stack.item.starts_with("minecraft:") {
+            return false;
+        }
+        let start = out.len();
+        let mut draw = super::native_block_entity_draw::BlockEntityDraw::posed(
+            partial,
+            self.world.game_time,
+            light,
+            [0; 3],
+            pose,
+            diffuse_lights(self.nether_lighting()),
+            std::mem::take(out),
+        );
+        let mut drawn = false;
+        self.native_item_submit(stack, display, &mut draw, &mut drawn);
+        *out = draw.into_vertices();
+        if !drawn {
+            out.truncate(start);
+        }
+        drawn
+    }
     /// Submit a resolved item under `pose` (camera-relative) at `light`
     /// (packed lightmap coordinates).
     pub(super) fn submit_item_world(

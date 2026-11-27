@@ -228,6 +228,9 @@ pub struct MobType {
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
     pub tempt: Arc<[String]>,
+    /// A content mod's type's own registration with `SpawnPlacements` (its
+    /// row's `spawn_placement`); None spawns as its species does.
+    pub spawn_placement: Option<spawn_rules::OwnPlacement>,
 }
 impl MobType {
     pub fn inventory_stack_limit(&self, stack: &crate::items::ItemStack) -> u32 {
@@ -451,6 +454,18 @@ impl MobTypes {
                 }
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
+            // A content mod's living type may name its own sound events and
+            // food tag in its row (docs/mods.md); each id is kept for the
+            // game's life, as the species' own are.
+            let own_sound = |key: &str| -> Option<&'static str> {
+                let id = t["sounds"][key].as_str()?;
+                Some(Box::leak(id.to_owned().into_boxed_str()))
+            };
+            let own_food: Option<Arc<[String]>> = t["food"].as_str().map(|id| {
+                let mut items: Vec<String> = item_tags.get(id).into_iter().flatten().cloned().collect();
+                items.sort();
+                items.into()
+            });
             let speed = attr("movement_speed").unwrap_or(0.25);
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
             out.insert(
@@ -501,17 +516,24 @@ impl MobTypes {
                     texture: def.texture.to_owned(),
                     brain: def.brain(),
                     anim: def.anim,
-                    sounds: def.sounds,
-                    step_sound: def.step_sound,
-                    food: def
-                        .food_tag()
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
-                    tempt: def
-                        .tempt_tag()
-                        .or(def.food_tag())
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                    sounds: [
+                        own_sound("ambient").unwrap_or(def.sounds[0]),
+                        own_sound("hurt").unwrap_or(def.sounds[1]),
+                        own_sound("death").unwrap_or(def.sounds[2]),
+                    ],
+                    step_sound: own_sound("step").or(def.step_sound),
+                    food: own_food.clone().unwrap_or_else(|| {
+                        def.food_tag()
+                            .map(tag)
+                            .unwrap_or_else(|| Arc::from(Vec::new()))
+                    }),
+                    tempt: own_food.unwrap_or_else(|| {
+                        def.tempt_tag()
+                            .or(def.food_tag())
+                            .map(tag)
+                            .unwrap_or_else(|| Arc::from(Vec::new()))
+                    }),
+                    spawn_placement: spawn_rules::OwnPlacement::of_row(&t["spawn_placement"]),
                     category,
                     id,
                 },
@@ -1491,6 +1513,16 @@ impl MobEvent {
             pitch,
             source,
         }
+    }
+}
+
+/// The id of a sound a mob names (`MobEvent::Sound`): vanilla's are written
+/// without their namespace, a content mod's type's own with it.
+pub fn sound_id(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.contains(':') {
+        name.into()
+    } else {
+        format!("minecraft:{name}").into()
     }
 }
 
@@ -4755,6 +4787,7 @@ pub(crate) mod sensor_scan_tests {
             step_sound: None,
             food: Arc::default(),
             tempt: Arc::default(),
+            spawn_placement: None,
         })
     }
     /// `n` mobs in pens of 20 spread over a square of `side` blocks, as on a

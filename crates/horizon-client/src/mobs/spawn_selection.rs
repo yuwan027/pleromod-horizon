@@ -369,6 +369,11 @@ pub trait NaturalLevel: SpawnLevel {
     fn has_ceiling(&self) -> bool;
     /// The entity type's species, width, height and category.
     fn mob_type(&self, entity: &str) -> Option<MobType>;
+    /// What a content mod's type registered with `SpawnPlacements`, in
+    /// place of its template's; None for vanilla's types.
+    fn own_placement(&self, _entity: &str) -> Option<spawn_rules::OwnPlacement> {
+        None
+    }
     /// The `natural_mob_spawns` lists by category at a position.
     fn biome_spawns(&self, x: i32, y: i32, z: i32) -> Option<&HashMap<String, Vec<SpawnEntry>>>;
     /// The `natural_mob_spawns` spawn cost of a type at a position.
@@ -1481,13 +1486,14 @@ fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
     if hooked && !in_list() {
         return false;
     }
-    if !spawn_rules::is_spawn_position_ok(species, l, x, y, z) {
+    let own = own_placement(l, &entry.entity);
+    if !spawn_rules::is_spawn_position_ok_as(own, species, l, x, y, z) {
         return false;
     }
     if !hooked && !listed && !in_list() {
         return false;
     }
-    if !spawn_rules::check_spawn_rules(species, l, Reason::Natural, random, x, y, z) {
+    if !spawn_rules::check_spawn_rules_as(own, species, l, Reason::Natural, random, x, y, z) {
         return false;
     }
     l.no_collision(spawn_aabb(
@@ -1544,6 +1550,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
         let mut z = zo + random.next_int_bound(16).unwrap_or(0);
         let (start_x, start_z) = (x, z);
         let kind = l.mob_type(&entry.entity);
+        let own = own_placement(l, &entry.entity);
         for _ in 0..count {
             let mut success = false;
             let mut attempts = 0;
@@ -1554,7 +1561,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
                 };
                 let pos = top_non_colliding(l, &entry.entity, x, z);
                 trace(GenEvent::Column(x, z));
-                if spawn_rules::is_spawn_position_ok(species, l, pos[0], pos[1], pos[2]) {
+                if spawn_rules::is_spawn_position_ok_as(own, species, l, pos[0], pos[1], pos[2]) {
                     let fx = f64::from(x).clamp(
                         f64::from(xo) + f64::from(width),
                         f64::from(xo) + 16.0 - f64::from(width),
@@ -1566,7 +1573,8 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
                     let fy = f64::from(pos[1]);
                     let (bx, bz) = (fx.floor() as i32, fz.floor() as i32);
                     if !l.no_collision(spawn_aabb(species, fx, fy, fz, width, height))
-                        || !spawn_rules::check_spawn_rules(
+                        || !spawn_rules::check_spawn_rules_as(
+                            own,
                             species,
                             l,
                             Reason::ChunkGeneration,
@@ -1610,10 +1618,22 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
         }
     }
 }
+/// A content mod's type's own registration: vanilla's ids are never asked,
+/// as natural spawning tries a great many positions.
+fn own_placement<L: NaturalLevel>(l: &L, entity: &str) -> Option<spawn_rules::OwnPlacement> {
+    if entity.starts_with("minecraft:") {
+        return None;
+    }
+    l.own_placement(entity)
+}
 /// `getTopNonCollidingPos`: the type's heightmap, under the ceiling in
 /// dimensions that have one, then the placement type's adjustment.
 fn top_non_colliding<L: NaturalLevel>(l: &L, entity: &str, x: i32, z: i32) -> [i32; 3] {
-    let heightmap = Heightmap::from_name(l.mob_data().heightmap(entity));
+    let own = own_placement(l, entity);
+    let heightmap = match own {
+        Some(own) => own.heightmap,
+        None => Heightmap::from_name(l.mob_data().heightmap(entity)),
+    };
     let mut y = l.heightmap(heightmap, x, z);
     if l.has_ceiling() {
         loop {
@@ -1629,8 +1649,11 @@ fn top_non_colliding<L: NaturalLevel>(l: &L, entity: &str, x: i32, z: i32) -> [i
             }
         }
     }
-    if l.mob_data().placement(entity) == super::data::Placement::OnGround
-        && l.pathfindable_land(x, y - 1, z)
+    let placement = match own {
+        Some(own) => own.placement,
+        None => l.mob_data().placement(entity),
+    };
+    if placement == super::data::Placement::OnGround && l.pathfindable_land(x, y - 1, z)
     {
         y -= 1;
     }

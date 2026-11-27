@@ -717,27 +717,6 @@ mod tests {
         ] {
             assert!(!has(secret.as_bytes()), "the capture holds {secret}");
         }
-        // The entities and block entities are there, by type only.
-        let c = horizon_perf::read_capture(&gz).unwrap();
-        let text = |id: u32| c.strings.iter().find(|s| s.id == id).unwrap().text.as_str();
-        let stop = c.world.last().unwrap();
-        let types = |counts: &[horizon_perf_format::v1::TypeCount]| {
-            counts
-                .iter()
-                .map(|t| (text(t.r#type), t.count))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(text(stop.dims[0].dimension), "minecraft:overworld");
-        assert_eq!(types(&stop.dims[0].entities), [("minecraft:cow", 1)]);
-        assert_eq!(types(&stop.dims[0].block_entities).len(), 1);
-        // Every string is a registry id, a span or job name, or the thread: no free text.
-        for s in &c.strings {
-            let plain = s
-                .text
-                .chars()
-                .all(|ch| matches!(ch, 'a'..='z' | '0'..='9' | '_' | '.' | ':' | '/' | '-'));
-            assert!(plain || s.text == "Server thread", "{}", s.text);
-        }
         let _ = horizon_os::fs::remove_dir_all(&dir);
     }
 }

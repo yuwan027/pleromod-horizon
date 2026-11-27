@@ -404,6 +404,20 @@ impl Game<'_> {
         for &slot in &hidden {
             menu.hide_slot(slot);
         }
+        // What its mod says of the slots now: a machine that runs gives nothing up.
+        if let (Kind::Mod(_), Some(BlockEntity::Mod(m))) =
+            (kind, self.world.block_entities.get(&pos))
+        {
+            let block = self
+                .res
+                .facts()
+                .get(self.world.block(pos.0, pos.1, pos.2))
+                .name
+                .to_string();
+            let filled: Vec<bool> = items.iter().map(Option::is_some).collect();
+            let states = self.mod_slot_states(&block, [pos.0, pos.1, pos.2], &m.data, &filled);
+            menu.set_mod_slot_states(states);
+        }
         // A crafting grid's result is what the guest was shown, the mods' say
         // included, while the grid is as it was then.
         let shown = Self::lan_mod_craft_shown(host, gi, &items);

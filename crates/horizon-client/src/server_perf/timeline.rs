@@ -150,14 +150,6 @@ fn chunk(side: Side, thread: ThreadEvents, strings: &mut Interner) -> TimelineCh
     chunk
 }
 
-/// The process has one timeline: tests that run one take this first.
-#[cfg(test)]
-pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

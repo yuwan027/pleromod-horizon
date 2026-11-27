@@ -218,6 +218,7 @@ fn load_player_type(models: &horizon_client::mobs::EntityModelDocument) -> Optio
             step_sound: None,
             food: Arc::from([]),
             tempt: Arc::from([]),
+            spawn_placement: None,
         })
     })
 }
@@ -790,6 +791,8 @@ impl Game<'_> {
         if body && self.mod_player_geometry(m, who, alpha as f32, camera, packed, out) {
             return;
         }
+        // `native_living_render_scale`: a mod's scale of the vanilla model and its layers.
+        let _scale = self.begin_render_scale(m, Some(true));
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
         // translucent_body marks the body OIT for the ghostly look. Only first

@@ -1,0 +1,8 @@
+# Plero Cottage's behaviour, the native half of the content mod `plerocottage` (web/mods/plerocottage):
+# a trait mod (docs/native-mods.md, "Trait mods"), so it needs no horizon-mixins.
+[mod]
+id = "plerocottage"
+version = "0.1.0"
+
+[api]
+path = "engine"

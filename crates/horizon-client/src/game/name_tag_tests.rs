@@ -77,6 +77,7 @@ fn mob(id: u32, entity: &str, species: Species, width: f64, height: f64) -> Mob 
         step_sound: None,
         food: Default::default(),
         tempt: Default::default(),
+        spawn_placement: None,
     };
     Mob::new(id, Arc::new(kind), Vec3::new(0.0, 64.0, 0.0), 0.0)
 }

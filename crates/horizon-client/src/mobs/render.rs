@@ -1077,6 +1077,25 @@ impl super::MobType {
         super::species::def(self.species).model
     }
 }
+thread_local! {
+    /// What a native mod scales the living entity being drawn by (`native_living_render_scale`);
+    /// the window's thread draws one entity at a time.
+    static RENDER_SCALE: std::cell::Cell<[f32; 3]> = const { std::cell::Cell::new([1.0; 3]) };
+}
+/// Holds a mod's scale of the entity being drawn ([`scaled_by`]): dropped, the next draws at 1.
+pub struct RenderScaleGuard(());
+impl Drop for RenderScaleGuard {
+    fn drop(&mut self) {
+        RENDER_SCALE.with(|s| s.set([1.0; 3]));
+    }
+}
+/// Draws the living entity whose geometry follows scaled by `scale` from its feet, until the
+/// guard drops: `poseStack.scale` right after `LivingEntityRenderer.submit`'s `pushPose`,
+/// which [`base_transform_at`] starts from.
+pub fn scaled_by(scale: [f32; 3]) -> RenderScaleGuard {
+    RENDER_SCALE.with(|s| s.set(scale));
+    RenderScaleGuard(())
+}
 /// The mob's root transform (LivingEntityRenderer.submit + setupRotations).
 pub fn base_transform(m: &Mob, alpha: f32, camera: glam::DVec3) -> glam::Mat4 {
     let a = f64::from(alpha);
@@ -1156,6 +1175,13 @@ pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4 
     // every living entity, after the sleeping offset and before
     // setupRotations, so a pose translation scales with the model but the bed
     // it lies in does not.
+    // A native mod's scale of this entity, outermost (`scaled_by`).
+    let scale = RENDER_SCALE.with(std::cell::Cell::get);
+    let origin = if scale == [1.0; 3] {
+        origin
+    } else {
+        origin * glam::Mat4::from_scale(glam::Vec3::from(scale))
+    };
     let mut base = origin
         * sleep_offset
         * glam::Mat4::from_scale(glam::Vec3::splat(m.model_scale()))
@@ -2868,6 +2894,7 @@ mod tests {
             step_sound: None,
             food: Arc::default(),
             tempt: Arc::default(),
+            spawn_placement: None,
         });
         let gliding = |previous: Vec3, current: Vec3| {
             let mut m = Mob::new(1, kind.clone(), Vec3::ZERO, 0.0);

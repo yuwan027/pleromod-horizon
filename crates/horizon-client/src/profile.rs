@@ -100,16 +100,17 @@ pub fn save(dir: &Path, profile: &Profile) -> std::io::Result<()> {
 /// 64×64, or the older 64×32.
 pub fn import_skin(dir: &Path, png: &[u8]) -> Result<(), String> {
     let (w, h, rgba) = crate::hud::decode_bytes(png).map_err(|e| e.to_string())?;
-    crate::skins::process_legacy_skin(w, h, &rgba).ok_or(format!(
-        "A skin is 64×64 (or 64×32) pixels; this one is {w}×{h}."
-    ))?;
+    crate::skins::process_legacy_skin(w, h, &rgba)
+        .ok_or_else(|| crate::lang::tr("horizon.profile.skin_size", &[&format!("{w}×{h}")]))?;
     fs::write(dir.join(SKIN_FILE), png).map_err(|e| e.to_string())
 }
 
 /// A cape picture the player imported: 64×32 (or the older 22×17).
 pub fn import_cape(dir: &Path, png: &[u8]) -> Result<(), String> {
     let (w, h, rgba) = crate::hud::decode_bytes(png).map_err(|e| e.to_string())?;
-    crate::skins::process_cape(w, h, &rgba).ok_or("That picture is not a cape.")?;
+    crate::skins::process_cape(w, h, &rgba).ok_or_else(|| {
+        crate::lang::get_or("horizon.profile.not_a_cape", "That picture is not a cape.")
+    })?;
     fs::write(dir.join(CAPE_FILE), png).map_err(|e| e.to_string())
 }
 

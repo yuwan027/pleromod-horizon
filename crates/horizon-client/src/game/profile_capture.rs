@@ -558,11 +558,6 @@ impl Game<'_> {
         if side == Some(ProfileSide::Server) {
             return self.start_server_only(options, trigger);
         }
-        let trigger = if trigger == Trigger::Ctl && self.options.benchmark.is_some() {
-            Trigger::Benchmark
-        } else {
-            trigger
-        };
         self.profile.server_only = None;
         self.profile.stopped_after = None;
         let start = client_perf::start_message(

@@ -10,8 +10,7 @@ pub(super) fn client_started(options: &Options) {
     if options.dedicated.is_some() {
         return;
     }
-    let automated = options.benchmark.is_some()
-        || options.offscreen
+    let automated = options.offscreen
         || options.frames.is_some()
         || options.world_frames.is_some();
     horizon_hooks::engine::activity(Activity::Menus);

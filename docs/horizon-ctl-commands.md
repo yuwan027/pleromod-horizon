@@ -141,7 +141,6 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | --- | --- | --- | --- |
 | `script [FILE] [--keep-going]` | CLI only | Run commands from FILE (or stdin), one per line | none |
 | `sleep SECONDS` | CLI only | Wait (in scripts) | none |
-| `mcp [--paced]` | CLI only | Serve the Model Context Protocol on stdin/stdout, one tool per command | none |
 | `bench SECONDS [raw]` | `bench` | Reset frame stats, wait, reply with the summary | `seconds` (number, required): how long to measure<br>`raw` (boolean): every frame time too (frame_ms, cpu_ms, gpu_ms; alloc_count and alloc_bytes in an alloc-count build) |
 | `stats [reset] [raw]` | `stats` | Frame-time summary since the last reset | `reset` (boolean): start counting again<br>`raw` (boolean): every frame time too (frame_ms, cpu_ms, gpu_ms; alloc_count and alloc_bytes in an alloc-count build) |
 | `gpu-passes [on\|off\|detail]` | CLI only | Time Horizon's own render passes on the GPU, shown in F3 and in stats and bench; detail adds dispatch times and, on Vulkan, fragment and vertex counts per world pass | `mode` (on, off, detail): on, off or detail; without it, only reports |

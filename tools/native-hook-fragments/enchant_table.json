@@ -1,0 +1,25 @@
+{
+  "hooks": [
+    {
+      "name": "enchant_offers",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchant_offers",
+      "neoforge": "none (a mixin at the head of EnchantmentMenu.slotsChanged, with EnchantmentScreen's renderBg and tooltip)",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "enchant_click",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchant_click",
+      "neoforge": "none (a mixin at the head of EnchantmentMenu.clickMenuButton)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "an enchanting table's offers and click for any item, as a mod makes them (`native_enchant_offers`, `native_enchant_click`, with `NativeEnchantOffers`).",
+  "doc_summary": "an enchanting table's offers and click for any item (`native_enchant_offers`, `native_enchant_click`): a mod's own costs, clues and tooltip where `EnchantmentMenu.slotsChanged` begins, and what a button does where `clickMenuButton` begins. Bundles need \"hooks\": @API:enchant_table@."
+}

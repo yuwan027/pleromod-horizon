@@ -313,7 +313,7 @@ impl Boat {
     /// `rideHeight`: a third of a boat's height, 8/9 of a raft's.
     fn ride_height(&self) -> f64 {
         let height = HEIGHT as f32;
-        f64::from(if &*self.wood == "bamboo" {
+        f64::from(if model_wood(&self.wood) == "bamboo" {
             height * 0.888_888_9
         } else {
             height / 3.0
@@ -399,11 +399,70 @@ impl Boat {
         }
     }
 }
+/// A boat type a content mod declares (`data/<id>/horizon/entity_type/`, on one of
+/// `horizon_mods::content::BOAT_TEMPLATES`): a boat or raft of its own id, placed by and dropping
+/// its own item, drawn with its own texture on its template's model. Such a boat's
+/// [`Boat::wood`] is the type's id, which has a `:` where vanilla's woods have none.
+pub(super) struct ModBoatType {
+    /// `<mod id>:<path>`, the entity type.
+    pub id: &'static str,
+    /// The item that places it, which it drops.
+    pub item: &'static str,
+    /// Its template is a raft (`minecraft:bamboo_raft`, `minecraft:bamboo_chest_raft`).
+    pub raft: bool,
+    pub chest: bool,
+    /// The sprite it is drawn with (`ruby:entity/boat/elm`); its template's without one.
+    pub texture: Option<&'static str>,
+}
+static MOD_BOATS: std::sync::OnceLock<Vec<ModBoatType>> = std::sync::OnceLock::new();
+/// Registers the content mods' boat types, `(id, template, item, texture)`: set once per process
+/// (false when it already was), as the thrown types are.
+pub(super) fn register_mod_boats(
+    types: impl IntoIterator<Item = (String, String, String, Option<String>)>,
+) -> bool {
+    if MOD_BOATS.get().is_some() {
+        return false;
+    }
+    let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    let types = types
+        .into_iter()
+        .map(|(id, template, item, texture)| ModBoatType {
+            id: leak(id),
+            item: leak(item),
+            raft: template.ends_with("raft"),
+            chest: template.contains("_chest_"),
+            texture: texture.map(leak),
+        });
+    MOD_BOATS.set(types.collect()).is_ok()
+}
+pub(super) fn mod_boats() -> &'static [ModBoatType] {
+    MOD_BOATS.get().map_or(&[], Vec::as_slice)
+}
+/// The mod boat type with entity type `id`, or that the item `id` places.
+#[cold]
+#[inline(never)]
+pub(super) fn mod_boat(id: &str) -> Option<&'static ModBoatType> {
+    mod_boats().iter().find(|t| t.id == id || t.item == id)
+}
+/// The vanilla wood whose model a boat of `wood` is drawn with and rides as: a mod type's
+/// template's (`oak`, or `bamboo` for a raft), else its own.
+pub(super) fn model_wood(wood: &str) -> &str {
+    if !wood.contains(':') {
+        return wood;
+    }
+    match mod_boat(wood) {
+        Some(t) if t.raft => "bamboo",
+        _ => "oak",
+    }
+}
 /// Item id -> (boat entity id, wood).
 impl Boat {
     /// The vanilla entity type id (`oak_boat`, `bamboo_chest_raft`), also
-    /// the item it drops.
+    /// the item it drops; a content mod's boat type's own id.
     pub(super) fn entity_type(&self) -> String {
+        if self.wood.contains(':') {
+            return self.wood.to_string();
+        }
         let chest = if self.chest { "chest_" } else { "" };
         if &*self.wood == "bamboo" {
             format!("minecraft:bamboo_{chest}raft")
@@ -415,7 +474,10 @@ impl Boat {
 /// The wood of a boat or chest boat item or entity type, and whether it
 /// carries a chest.
 pub(super) fn any_boat_wood(item: &str) -> Option<(&str, bool)> {
-    let name = item.strip_prefix("minecraft:")?;
+    let Some(name) = item.strip_prefix("minecraft:") else {
+        // A content mod's boat type, by its id or its item: its "wood" is its id.
+        return mod_boat(item).map(|t| (t.id, t.chest));
+    };
     if let Some(wood) = name
         .strip_suffix("_chest_boat")
         .or_else(|| name.strip_suffix("_chest_raft"))
@@ -439,6 +501,7 @@ pub(super) struct BoatModels {
 impl BoatModels {
     /// Whether a boat of this wood (with or without a chest) can be drawn.
     pub fn has(&self, wood: &str, chest: bool) -> bool {
+        let wood = model_wood(wood);
         if chest {
             self.chest_models.contains_key(wood)
         } else {
@@ -1910,7 +1973,8 @@ impl Game<'_> {
                 self.entity_killed_event(at, false);
             }
             if !creative && self.ui.rules.bool("entity_drops") {
-                let item = b.entity_type();
+                // `getDropItem`: a content mod's boat type drops the item that places it.
+                let item = mod_boat(&b.wood).map_or_else(|| b.entity_type(), |t| t.item.to_owned());
                 self.spawn_item_own(
                     ItemStack {
                         item: Arc::from(item.as_str()),
@@ -1961,15 +2025,17 @@ impl Game<'_> {
             } else {
                 &self.boat_models.models
             };
-            let Some(model) = models.get(&*b.wood) else {
+            let wood = model_wood(&b.wood);
+            let Some(model) = models.get(wood) else {
                 continue;
             };
             let folder = if b.chest { "chest_boat" } else { "boat" };
-            let Some(uv) = self
-                .gui
-                .atlas
-                .sprites
-                .get(&format!("entity/{folder}/{}", b.wood))
+            // A content mod's boat type's own texture, on its template's model.
+            let own = mod_boat(&b.wood).and_then(|t| t.texture);
+            let sprites = &self.gui.atlas.sprites;
+            let Some(uv) = own
+                .and_then(|name| sprites.get(name))
+                .or_else(|| sprites.get(&format!("entity/{folder}/{wood}")))
                 .map(|r| [r.u0, r.v0, r.u1, r.v1])
             else {
                 continue;
@@ -2036,7 +2102,7 @@ impl Game<'_> {
             // BoatRenderer.submitTypeAdditions: the water patch hides the water
             // inside the hull unless the boat is under water (RaftRenderer has none).
             if let Some(patch) = self.boat_models.water_patch.as_ref()
-                && &*b.wood != "bamboo"
+                && model_wood(&b.wood) != "bamboo"
                 && !matches!(b.status, Status::UnderWater | Status::UnderFlowingWater)
             {
                 // Depth only, so its texture is never seen; one texel of the white sprite, the

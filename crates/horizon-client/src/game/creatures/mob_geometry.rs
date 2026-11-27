@@ -221,6 +221,8 @@ impl Game<'_> {
                 self.lit_posed_entity(entity_start..out.len(), posed_start);
                 continue;
             }
+            // `native_living_render_scale`: a mod's scale of the vanilla model and its layers.
+            let _scale = self.begin_render_scale(mob, is_player.then_some(false));
             if mob.species() == Species::SulfurCube
                 && !horizon_client::mobs::trader::is_invisible(mob)
             {

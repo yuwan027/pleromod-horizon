@@ -17,7 +17,6 @@ horizon-client-core = { path = "../horizon-client-core" }
 horizon-client-input = { path = "../horizon-client-input" }
 horizon-command = { path = "../horizon-command" }
 horizon-core = { path = "../horizon-core" }
-horizon-hdr = { path = "../horizon-hdr" }
 horizon-items = { path = "../horizon-items" }
 # The narrator option's status and whether the narrator is there (Options.narrator).
 horizon-narrator = { path = "../horizon-narrator" }
@@ -82,7 +81,6 @@ alloc-count = ["horizon-threads/alloc-count"]
 workspace = true
 
 [dev-dependencies]
-horizon-perf = { path = "../horizon-perf" }
 # Tests: a TrueType font to load, and the design system the menus' motion curves match.
 horizon-theme = { path = "../horizon-theme" }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }

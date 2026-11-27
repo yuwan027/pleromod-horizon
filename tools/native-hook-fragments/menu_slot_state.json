@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "menu_slot_state",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_slot_state",
+      "neoforge": "none (a Java menu's own Slot overrides mayPickup, mayPlace and isActive; no event)",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a mod menu's container slots as they are right now: whether a player may take from one, put into it, and whether it is there (`native_menu_slot_state`).",
+  "doc_summary": "a mod menu's container slots as they are right now (`native_menu_slot_state`): `Slot.mayPickup`, `Slot.mayPlace` and `Slot.isActive` by the machine's state. Bundles need \"hooks\": @API:menu_slot_state@."
+}

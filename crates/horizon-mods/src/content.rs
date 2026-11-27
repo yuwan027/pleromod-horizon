@@ -431,8 +431,45 @@ pub enum EffectCategory {
     Neutral,
 }
 
+/// `AttributeModifier.Operation`, by the names 26.3 writes.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModifierOperation {
+    AddValue,
+    AddMultipliedBase,
+    AddMultipliedTotal,
+}
+
+impl ModifierOperation {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::AddValue => "add_value",
+            Self::AddMultipliedBase => "add_multiplied_base",
+            Self::AddMultipliedTotal => "add_multiplied_total",
+        }
+    }
+}
+
+/// An attribute modifier a mob effect grants while it lasts
+/// (`MobEffect.addAttributeModifier`).
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EffectModifier {
+    /// The attribute (`minecraft:movement_speed`).
+    pub attribute: String,
+    /// The modifier's id (`ruby:effect.glow`).
+    pub id: String,
+    /// The amount at the first level (amplifier 0).
+    pub amount: f64,
+    /// What each further level adds; left out, `amount`, as vanilla's
+    /// `amount * (amplifier + 1)`.
+    #[serde(default)]
+    pub per_level: Option<f64>,
+    pub operation: ModifierOperation,
+}
+
 /// A mob effect the mod adds: what `new MobEffect(category, color)` takes.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MobEffect {
     /// `<mod id>:<path>`.
@@ -441,6 +478,9 @@ pub struct MobEffect {
     pub category: EffectCategory,
     /// RGB, `0x000000` to `0xFFFFFF`.
     pub color: u32,
+    /// What it adds to its entity's attributes while it lasts.
+    #[serde(default)]
+    pub attribute_modifiers: Vec<EffectModifier>,
 }
 
 mod fluid;
@@ -448,9 +488,14 @@ use fluid::check_fluid;
 pub use fluid::{FLUID_TEMPLATES, Fluid};
 
 /// the vanilla entity types a mod's type may copy: thrown item
-/// projectiles (`ThrowableItemProjectile`), then living mobs
-/// ([`LIVING_TEMPLATES`]).
-pub const ENTITY_TEMPLATES: [&str; 4] = [
+/// projectiles (`ThrowableItemProjectile`), boats ([`BOAT_TEMPLATES`]),
+/// then living mobs ([`LIVING_TEMPLATES`]).
+pub const ENTITY_TEMPLATES: [&str; 9] = [
+    "minecraft:bamboo_chest_raft",
+    "minecraft:bamboo_raft",
+    "minecraft:cow",
+    "minecraft:oak_boat",
+    "minecraft:oak_chest_boat",
     "minecraft:snowball",
     "minecraft:villager",
     "minecraft:wandering_trader",
@@ -462,16 +507,30 @@ pub const ENTITY_TEMPLATES: [&str; 4] = [
 /// ...)`), with its own default attributes (`EntityAttributeCreationEvent`).
 /// The wandering trader is the neutral one whose behaviour is all goals,
 /// which a native mod can replace (`register_goals`); a villager's is its
-/// brain.
-pub const LIVING_TEMPLATES: [&str; 3] = [
+/// brain. The cow is the passive animal (`Animal`): it breeds, grows up,
+/// follows its food and spawns as animals do, and its behaviour is all goals
+/// too.
+pub const LIVING_TEMPLATES: [&str; 4] = [
+    "minecraft:cow",
     "minecraft:villager",
     "minecraft:wandering_trader",
     "minecraft:zombie",
 ];
 
+/// the [`ENTITY_TEMPLATES`] that are boats (`Boat`, `ChestBoat`): a type
+/// copying one is a boat or a raft, with or without a chest, placed by its
+/// own `item`, which it also drops, and drawn with its own `texture` on its
+/// template's model.
+pub const BOAT_TEMPLATES: [&str; 4] = [
+    "minecraft:bamboo_chest_raft",
+    "minecraft:bamboo_raft",
+    "minecraft:oak_boat",
+    "minecraft:oak_chest_boat",
+];
+
 /// an entity type the mod adds: a copy of a vanilla template's. A thrown one
-/// is thrown from `item` and drawn as it; a living one is its template's mob
-/// with other `attributes`.
+/// is thrown from `item` and drawn as it; a boat is placed from `item`; a
+/// living one is its template's mob with other `attributes`.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EntityType {
@@ -481,9 +540,15 @@ pub struct EntityType {
     /// one of [`ENTITY_TEMPLATES`].
     pub template: String,
     /// a thrown type's: one of the mod's own items, which throws it. A
-    /// living type has none.
+    /// boat's: the item that places it, which it drops. A living type has
+    /// none.
     #[serde(default)]
     pub item: Option<String>,
+    /// a boat's own texture, `namespace:path` under `textures/` without
+    /// `.png` (`ruby:entity/boat/elm`), laid out as its template's; its
+    /// template's where it gives none.
+    #[serde(default)]
+    pub texture: Option<String>,
     /// a thrown type's: what a hit deals to an entity, as `thrown` damage.
     #[serde(default)]
     pub damage: f32,
@@ -493,12 +558,97 @@ pub struct EntityType {
     /// when the content root builds.
     #[serde(default)]
     pub attributes: BTreeMap<String, f64>,
+    /// a living type's own bounding box (`EntityType.Builder.sized`), in
+    /// blocks; its template's where it gives none.
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
+    /// its eyes above its feet; 0.85 of `height` where only that is given
+    /// (`EntityDimensions.scalable`).
+    #[serde(default)]
+    pub eye_height: Option<f64>,
+    /// a living type's own sound events (`getAmbientSound` and the others),
+    /// each `namespace:event`; its template's where one is left out.
+    #[serde(default)]
+    pub sounds: Option<EntitySounds>,
+    /// a living type's food (`Animal.isFood`), which also tempts it: an item
+    /// tag (`c:seeds`); its template's where it gives none.
+    #[serde(default)]
+    pub food: Option<String>,
+    /// where a living type may spawn naturally, as the mod registered it
+    /// (`SpawnPlacements.register`); its template's where it gives none.
+    #[serde(default)]
+    pub spawn_placement: Option<SpawnPlacement>,
+}
+
+/// where a mod's living type may spawn ([`EntityType::spawn_placement`]):
+/// what `SpawnPlacements.register` takes. A class the mod registered nothing
+/// for spawns anywhere under no rule, as vanilla treats it:
+/// `{ "type": "no_restrictions", "rules": "none" }`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnPlacement {
+    /// `SpawnPlacementTypes`: `on_ground`, `in_water`, `in_lava` or
+    /// `no_restrictions`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// `Heightmap.Types`, in lower case; `motion_blocking_no_leaves` left out.
+    #[serde(default)]
+    pub heightmap: Option<String>,
+    /// the spawn predicate: `animal` (`Animal.checkAnimalSpawnRules`), `mob`
+    /// (`Mob.checkMobSpawnRules`), `monster`
+    /// (`Monster.checkMonsterSpawnRules`) or `none`.
+    pub rules: String,
+}
+
+impl SpawnPlacement {
+    pub const TYPES: [&'static str; 4] = ["on_ground", "in_water", "in_lava", "no_restrictions"];
+    pub const HEIGHTMAPS: [&'static str; 4] = [
+        "world_surface",
+        "ocean_floor",
+        "motion_blocking",
+        "motion_blocking_no_leaves",
+    ];
+    pub const RULES: [&'static str; 4] = ["animal", "mob", "monster", "none"];
+
+    /// what is wrong with it, if anything.
+    pub fn check(&self) -> Result<(), String> {
+        let one_of = |what: &str, value: &str, known: &[&str]| match known.contains(&value) {
+            true => Ok(()),
+            false => Err(format!("spawn_placement: {what} is one of {}, not {value}", known.join(", "))),
+        };
+        one_of("type", &self.kind, &Self::TYPES)?;
+        if let Some(heightmap) = &self.heightmap {
+            one_of("heightmap", heightmap, &Self::HEIGHTMAPS)?;
+        }
+        one_of("rules", &self.rules, &Self::RULES)
+    }
+}
+
+/// the sound events of a mod's living type ([`EntityType::sounds`]).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct EntitySounds {
+    #[serde(default)]
+    pub ambient: Option<String>,
+    #[serde(default)]
+    pub hurt: Option<String>,
+    #[serde(default)]
+    pub death: Option<String>,
+    /// its footstep, played at 15% as vanilla's are.
+    #[serde(default)]
+    pub step: Option<String>,
 }
 
 impl EntityType {
     /// whether the type copies a living mob ([`LIVING_TEMPLATES`]).
     pub fn is_living(&self) -> bool {
         LIVING_TEMPLATES.contains(&self.template.as_str())
+    }
+    /// whether the type copies a boat ([`BOAT_TEMPLATES`]).
+    pub fn is_boat(&self) -> bool {
+        BOAT_TEMPLATES.contains(&self.template.as_str())
     }
 }
 
@@ -981,6 +1131,11 @@ impl Content {
             if file.color > 0xFF_FFFF {
                 return Err(format!("{name}: color is RGB, 0 to 16777215 (0xFFFFFF)"));
             }
+            if let Some(modifier) = file.attribute_modifiers.iter().find(|m| {
+                !m.amount.is_finite() || m.per_level.is_some_and(|step| !step.is_finite())
+            }) {
+                return Err(format!("{name}: the amount of {} is not a number", modifier.id));
+            }
             self.effects.push(MobEffect { id: effect, ..file });
         }
         // After every block and item: a fluid's bucket and block are the mod's own.
@@ -1063,6 +1218,21 @@ impl Content {
                     file.template
                 ));
             }
+            if file.texture.is_some() && !file.is_boat() {
+                return Err(format!(
+                    "{name}: only a boat has a texture (its template is {})",
+                    file.template
+                ));
+            }
+            if let Some(texture) = &file.texture
+                && !texture
+                    .split_once(':')
+                    .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty())
+            {
+                return Err(format!(
+                    "{name}: texture {texture:?} is namespace:path under textures/"
+                ));
+            }
             if file.is_living() {
                 // a mob is spawned, not thrown: nothing throws it, and its
                 // attack is its `minecraft:attack_damage`.
@@ -1085,20 +1255,38 @@ impl Content {
                         return Err(format!("{name}: attribute {attribute} is a finite number"));
                     }
                 }
+                for size in [file.width, file.height, file.eye_height].into_iter().flatten() {
+                    if !size.is_finite() || size <= 0.0 {
+                        return Err(format!("{name}: a size is a positive number of blocks"));
+                    }
+                }
+                if let Some(placement) = &file.spawn_placement {
+                    placement.check().map_err(|e| format!("{name}: {e}"))?;
+                }
                 self.entity_types.push(EntityType { id: kind, ..file });
                 continue;
             }
-            if !file.attributes.is_empty() {
+            if !file.attributes.is_empty()
+                || file.width.is_some()
+                || file.height.is_some()
+                || file.eye_height.is_some()
+                || file.sounds.is_some()
+                || file.food.is_some()
+                || file.spawn_placement.is_some()
+            {
                 return Err(format!(
-                    "{name}: only a living type has attributes (its template is {})",
+                    "{name}: only a living type has attributes, a size, sounds or food (its template is {})",
                     file.template
                 ));
             }
             let Some(item) = &file.item else {
                 return Err(format!(
-                    "{name}: a thrown type names the item that throws it"
+                    "{name}: a thrown type names the item that throws it, a boat the item that places it"
                 ));
             };
+            if file.is_boat() && file.damage != 0.0 {
+                return Err(format!("{name}: a boat has no damage"));
+            }
             // its own item, so no vanilla item loses its use to it.
             if !ids.contains(item) {
                 return Err(format!(
@@ -1111,7 +1299,7 @@ impl Content {
                 .any(|t| t.item.as_ref() == Some(item))
             {
                 return Err(format!(
-                    "{name}: item {item:?} already throws another entity type"
+                    "{name}: item {item:?} already throws another entity type (or places it)"
                 ));
             }
             if !(file.damage.is_finite() && file.damage >= 0.0) {
@@ -2180,6 +2368,67 @@ capabilities = ["registries"]
             ("menu-missing", r#"{"data_slots": 1}"#, "missing field"),
         ] {
             let files: &[(&str, &[u8])] = &[("data/ruby/horizon/menu/a.json", file.as_bytes())];
+            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            assert!(e.contains(why), "{case}: {e}");
+        }
+    }
+
+    #[test]
+    fn entity_types_copy_a_boat_with_its_item_and_texture() {
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/item/elm_boat.json", ITEM),
+            (
+                "data/ruby/horizon/entity_type/elm_boat.json",
+                br#"{"template": "minecraft:oak_boat", "item": "ruby:elm_boat", "texture": "ruby:entity/boat/elm"}"#,
+            ),
+            ("data/ruby/horizon/item/reed_chest_raft.json", ITEM),
+            (
+                "data/ruby/horizon/entity_type/reed_chest_raft.json",
+                br#"{"template": "minecraft:bamboo_chest_raft", "item": "ruby:reed_chest_raft"}"#,
+            ),
+        ];
+        let content = hmod("boats", MANIFEST_TEXT, files).unwrap();
+        let types: Vec<_> = content
+            .entity_types
+            .iter()
+            .map(|t| (t.id.as_str(), t.is_boat(), t.item.as_deref(), t.texture.as_deref()))
+            .collect();
+        assert_eq!(
+            types,
+            [
+                ("ruby:elm_boat", true, Some("ruby:elm_boat"), Some("ruby:entity/boat/elm")),
+                ("ruby:reed_chest_raft", true, Some("ruby:reed_chest_raft"), None),
+            ]
+        );
+        let boat = |rest: &str| format!(r#"{{"template": "minecraft:oak_boat"{rest}}}"#);
+        for (case, file, why) in [
+            ("boat-item", boat(""), "a boat the item that places it"),
+            (
+                "boat-damage",
+                boat(r#", "item": "ruby:elm_boat", "damage": 1"#),
+                "a boat has no damage",
+            ),
+            (
+                "boat-texture",
+                boat(r#", "item": "ruby:elm_boat", "texture": "elm""#),
+                "is namespace:path under textures/",
+            ),
+            (
+                "boat-size",
+                boat(r#", "item": "ruby:elm_boat", "width": 2.0"#),
+                "only a living type has",
+            ),
+            (
+                "thrown-texture",
+                r#"{"template": "minecraft:snowball", "item": "ruby:elm_boat", "texture": "ruby:a"}"#
+                    .to_owned(),
+                "only a boat has a texture",
+            ),
+        ] {
+            let files: &[(&str, &[u8])] = &[
+                ("data/ruby/horizon/item/elm_boat.json", ITEM),
+                ("data/ruby/horizon/entity_type/a.json", file.as_bytes()),
+            ];
             let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }

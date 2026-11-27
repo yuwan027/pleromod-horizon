@@ -1,0 +1,35 @@
+[package]
+name = "horizon-web-game"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The browser game with the native mods web/build.sh builds in"
+
+# The launcher's generated executable for trait mods (launcher/src/native_mods/api.rs), as a fixed
+# package: each native mod is a feature, which web/build.sh turns on from its list.
+[[bin]]
+name = "horizon-client"
+path = "src/main.rs"
+test = false
+
+# The same game for the machine that builds the page: web/build.sh runs it once to build the
+# content root the page's game would build at every start (HORIZON_WEB_CONTENT). Under a name of
+# its own, so it doesn't replace the workspace's native horizon-client in the target folder.
+[[bin]]
+name = "horizon-web-content"
+path = "src/content.rs"
+test = false
+
+[dependencies]
+horizon-client = { path = "../../crates/horizon-client", default-features = false }
+horizon-os = { path = "../../crates/horizon-os" }
+horizon-threads = { path = "../../crates/horizon-threads" }
+horizon-mods = { path = "../../crates/horizon-mods", default-features = false }
+plerocottage-native = { path = "../../mods/plerocottage/engine", optional = true }
+
+[features]
+audio = ["horizon-client/audio"]
+plerocottage = ["dep:plerocottage-native"]
+
+[lints]
+workspace = true

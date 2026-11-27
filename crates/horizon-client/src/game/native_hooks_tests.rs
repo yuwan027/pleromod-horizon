@@ -486,6 +486,7 @@ fn mod_screen_data_is_its_windows_only() {
         screen: super::NativeScreen::default(),
         data: Vec::new(),
         extra: None,
+        states: Vec::new(),
     };
     assert!(s.set_data(4, 1, 7));
     assert!(!s.set_data(3, 1, 99));

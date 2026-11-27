@@ -132,7 +132,6 @@ impl Loading {
             horizon_threads::system_menu::suppress(hwnd);
         }
         drop(window_step);
-        horizon_client::telemetry::note_display(&window);
         // The renderer takes seconds to build and winit's window sits white
         // until the first frame presents, so paint the boot screen on it and
         // keep repainting it as the console's lines arrive; the wgpu frames
@@ -332,7 +331,16 @@ impl Loading {
             self.settings.file.double("panoramaScrollSpeed") as f32,
         );
         if let Some(renderer) = &mut self.renderer {
-            match renderer.render(&frame) {
+            let presented = renderer.render(&frame);
+            // The page's own loading screen stands for the boot screen (drawn
+            // without its atlas here, black): it stays over the canvas until a
+            // frame with the menu bundle (the title, or the world's loading
+            // overlay) is on it.
+            #[cfg(target_arch = "wasm32")]
+            if matches!(presented, Ok(true)) && self.gui.is_some() {
+                horizon_os::web::shown();
+            }
+            match presented {
                 Ok(true) if self.gui.is_some() && self.menu.pending.is_none() => {
                     self.title_drawn = true;
                     self.menu.perf.title_shown()
@@ -412,7 +420,6 @@ impl Loading {
             pack_error,
             audio,
             self.vanilla_root.clone(),
-            self.started,
             loaded.rest_loader,
             Some(self.settings.clone()),
             loaded.game_cpu,

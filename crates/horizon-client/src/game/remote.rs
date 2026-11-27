@@ -7767,7 +7767,11 @@ impl Game<'_> {
             let seq = self.next_sequence();
             // DebugStickItem.canDestroyBlock never lets the client break the
             // block; the server only selects the property on this START.
-            if !debug_stick {
+            // The shared world: a break the coins left don't cover is not shown; the server
+            // refuses it and says why.
+            let affordable = !super::play_world::active()
+                || super::play_world::break_affordable(&self.play_state_text(state));
+            if !debug_stick && affordable {
                 self.predict_break(hit.pos, state, seq);
             }
             self.send(S::PlayerAction(play::PlayerAction {

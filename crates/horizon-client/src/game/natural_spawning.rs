@@ -584,6 +584,9 @@ impl<H: LevelHost> NaturalLevel for Level<'_, H> {
     fn has_ceiling(&self) -> bool {
         self.w.world.shape.has_ceiling
     }
+    fn own_placement(&self, entity: &str) -> Option<horizon_client::mobs::spawn_rules::OwnPlacement> {
+        self.host.mob_types.get(entity)?.spawn_placement
+    }
     fn mob_type(&self, entity: &str) -> Option<(Species, f32, f32, Category)> {
         let t = self.host.mob_types.get(entity)?;
         Some((

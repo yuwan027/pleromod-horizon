@@ -164,6 +164,29 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     ) -> Option<BlockStateId> {
         self.native_state_with_property(state, key, value)
     }
+    fn state_block(&self, state: BlockStateId) -> Option<String> {
+        self.registry.state(state).map(|s| s.name.clone())
+    }
+    fn state_property(&self, state: BlockStateId, key: &str) -> Option<String> {
+        self.registry
+            .state(state)?
+            .properties
+            .get(key)
+            .map(|v| v.to_string())
+    }
+    fn default_state(&self, block: &str) -> Option<BlockStateId> {
+        self.registry.default_state(block)
+    }
+    fn raw_brightness(&self, pos: [i32; 3]) -> i32 {
+        horizon_world::level::raw_brightness(
+            self,
+            BlockPos::new(pos[0], pos[1], pos[2]),
+            horizon_world::level::LevelAccess::sky_darken(self),
+        )
+    }
+    fn replaceable(&self, state: BlockStateId) -> bool {
+        self.behaviours.is_replaceable(state)
+    }
 }
 
 impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
@@ -205,6 +228,21 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     ) -> Option<BlockStateId> {
         horizon_client::mod_api::LevelHost::state_with_property(&*self.level, state, key, value)
     }
+    fn state_block(&self, state: BlockStateId) -> Option<String> {
+        horizon_client::mod_api::LevelHost::state_block(&*self.level, state)
+    }
+    fn state_property(&self, state: BlockStateId, key: &str) -> Option<String> {
+        horizon_client::mod_api::LevelHost::state_property(&*self.level, state, key)
+    }
+    fn default_state(&self, block: &str) -> Option<BlockStateId> {
+        horizon_client::mod_api::LevelHost::default_state(&*self.level, block)
+    }
+    fn raw_brightness(&self, pos: [i32; 3]) -> i32 {
+        horizon_client::mod_api::LevelHost::raw_brightness(&*self.level, pos)
+    }
+    fn replaceable(&self, state: BlockStateId) -> bool {
+        horizon_client::mod_api::LevelHost::replaceable(&*self.level, state)
+    }
 }
 
 impl horizon_client::mod_api::LevelRandomHost for LevelTicks<'_, &mut super::GameLevel<'_>> {
@@ -237,6 +275,19 @@ impl horizon_client::mod_api::LevelWriteHost for LevelTicks<'_, &mut super::Game
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {
         self.level
             .native_set_block_property(self.ticks, pos, key, value, flags)
+    }
+    fn set_block(&mut self, pos: [i32; 3], state: BlockStateId, flags: i32) -> bool {
+        if !self.level.native_authoritative || self.level.registry.state(state).is_none() {
+            return false;
+        }
+        let b = self.level.behaviours;
+        b.set_block(
+            &mut *self.level,
+            self.ticks,
+            BlockPos::new(pos[0], pos[1], pos[2]),
+            state,
+            flags,
+        )
     }
 
     fn play_sound(

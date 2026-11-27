@@ -39,6 +39,14 @@ pub trait Goal: std::fmt::Debug + Send + Sync {
         false
     }
     fn tick(&mut self, _m: &mut Mob, _cx: &mut Cx) {}
+    /// What the goal keeps of its state in the mob's saved compound, under
+    /// keys of its own (a mod's class writing a timer in
+    /// `addAdditionalSaveData`). Vanilla's goals keep nothing.
+    fn save(&self, _tag: &mut horizon_world::nbt::Compound) {}
+    /// Takes back what [`Goal::save`] wrote, when the mob is loaded
+    /// (`readAdditionalSaveData`): after `registerGoals`, with the whole
+    /// saved compound.
+    fn load(&mut self, _tag: &horizon_world::nbt::Compound) {}
     fn box_clone(&self) -> Box<dyn Goal>;
     /// The goal's name for debugging (`Goal.toString`).
     fn name(&self) -> &'static str {
@@ -101,6 +109,18 @@ impl GoalSelector {
     pub fn clear(&mut self) {
         self.goals.clear();
         self.locked = [None; 4];
+    }
+    /// [`Goal::save`] of every goal, in their order.
+    pub fn save(&self, tag: &mut horizon_world::nbt::Compound) {
+        for g in &self.goals {
+            g.goal.save(tag);
+        }
+    }
+    /// [`Goal::load`] of every goal.
+    pub fn load(&mut self, tag: &horizon_world::nbt::Compound) {
+        for g in &mut self.goals {
+            g.goal.load(tag);
+        }
     }
     pub fn running_names(&self) -> Vec<&'static str> {
         self.goals
@@ -2146,6 +2166,9 @@ impl Goal for Breed {
             return false;
         }
         let id = m.id;
+        // Animal.canMate: the same class. A content mod's type on an animal
+        // template is a class of its own, not its template's.
+        let own_type = super::seen::own_type(&m.kind.id);
         // Horses and donkeys breed together (AbstractHorse.canParent: tame).
         // Sniffer.canMate: calm states only.
         let sniffer = species == Species::Sniffer;
@@ -2176,6 +2199,7 @@ impl Goal for Breed {
                     || !llama && equine && matches!(s.species, Species::Horse | Species::Donkey);
                 s.id != id
                     && same
+                    && s.own_type == own_type
                     && s.in_love
                     && !s.baby
                     && (!tamable || s.tame)

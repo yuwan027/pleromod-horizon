@@ -448,6 +448,10 @@ impl Game<'_> {
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
+        if matches!(kind, Kind::Mod(_)) {
+            // What its mod says of the slots now, as the server's menu has them.
+            menu.set_mod_slot_states(self.native_screen_slot_states());
+        }
         let total = menu.slot_count();
         let before: Vec<Option<ItemStack>> = game_of
             .iter()

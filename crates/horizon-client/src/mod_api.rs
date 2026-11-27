@@ -24,6 +24,7 @@ pub use crate::fog::{FogData, FogType};
 pub use crate::game::NativeAttributeModifier;
 pub use crate::game::NativeChunkSnapshot;
 pub use crate::game::NativeEffect;
+pub use crate::game::NativeEnchantOffers;
 pub use crate::game::NativeEffectV2;
 pub use crate::game::NativeFluidTank;
 pub use crate::game::NativeInventoryError;
@@ -1195,6 +1196,27 @@ pub trait LevelHost {
         key: &str,
         value: &str,
     ) -> Option<BlockStateId>;
+    /// The block `state` is a state of (`BlockState.getBlock()`), by its name; None for an unknown state.
+    fn state_block(&self, _state: BlockStateId) -> Option<String> {
+        None
+    }
+    /// `BlockState.getValue` as the property's text; None when the block has no such property.
+    fn state_property(&self, _state: BlockStateId, _key: &str) -> Option<String> {
+        None
+    }
+    /// `Block.defaultBlockState()` of the block named; None for an unknown block.
+    fn default_state(&self, _block: &str) -> Option<BlockStateId> {
+        None
+    }
+    /// `Level.getMaxLocalRawBrightness(pos)`: the sky's light less its darkening, or the blocks' light where
+    /// that is more. What a sapling or a crop grows by.
+    fn raw_brightness(&self, _pos: [i32; 3]) -> i32 {
+        15
+    }
+    /// `BlockState.canBeReplaced()`: air, grass, fluids and the like.
+    fn replaceable(&self, _state: BlockStateId) -> bool {
+        false
+    }
 }
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
@@ -1213,10 +1235,16 @@ pub trait LevelTicksHost: LevelHost {
     fn schedule_fluid_tick(&mut self, pos: [i32; 3], fluid: &str, delay: i32) -> bool;
 }
 
-/// Mutable level services, like vanilla's `ServerLevel`. Whole-block writes wait for block entity support.
+/// Mutable level services, like vanilla's `ServerLevel`. Whole-block writes are for blocks without a block entity.
 pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool;
+    /// `Level.setBlock(pos, state, flags)` for a block without a block entity: what a growing plant puts
+    /// beside itself, or a sapling's tree. False off an authoritative server, at a position that isn't
+    /// loaded, and where the block is `state` already.
+    fn set_block(&mut self, _pos: [i32; 3], _state: BlockStateId, _flags: i32) -> bool {
+        false
+    }
     /// Play a sound for nearby players through `native_play_sound`.
     fn play_sound(
         &mut self,

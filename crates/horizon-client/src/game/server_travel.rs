@@ -420,6 +420,9 @@ impl Game<'_> {
         target: Dim,
         cause: &str,
     ) -> bool {
+        if !target.reachable() {
+            return false;
+        }
         let Some(g) = host.hub.guest(conn) else {
             return false;
         };

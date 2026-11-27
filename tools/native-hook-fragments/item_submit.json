@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "item_submit",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_submit",
+      "neoforge": "IClientItemExtensions.getCustomRenderer (BlockEntityWithoutLevelRenderer.renderByItem)",
+      "side": "client",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "drawn"
+      }
+    }
+  ],
+  "rust_summary": "a held item a mod draws itself in place of its model (`native_item_submit`).",
+  "doc_summary": "a held item a mod draws itself, in the first person's hands and in a holder's (`native_item_submit`), as a NeoForge item's custom renderer does. Bundles need \"hooks\": @API:item_submit@."
+}

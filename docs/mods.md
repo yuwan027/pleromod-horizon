@@ -345,8 +345,20 @@ category (`beneficial`, `harmful` or `neutral`) and its RGB colour (0 to `0xFFFF
 It is the effect `<id>:<name>`: `/effect give @s ruby:glow 30` gives it, saves and mobs keep it, and it reaches LAN and
 dedicated server players who run the same mods (its network id follows vanilla's). Its name is the translation
 `effect.<id>.<name>` from the mod's `assets/<id>/lang/`, its icon `assets/<id>/textures/mob_effect/<name>.png` (18x18,
-as vanilla's; without one it draws as the missing texture). It does nothing on its own yet: no tick behaviour and no
-attribute modifiers. A world opened without the mod drops the effect from its players and mobs. Clients join a server
+as vanilla's; without one it draws as the missing texture). `attribute_modifiers` lists what it adds to its entity's
+attributes while it lasts (`MobEffect.addAttributeModifier`), on players and mobs: the attribute, the modifier's id,
+the `amount` at the first level, the `operation` (`add_value`, `add_multiplied_base` or `add_multiplied_total`) and,
+optionally, what each further level adds (`per_level`; left out it is `amount`, vanilla's `amount * (amplifier + 1)`;
+0 keeps one amount at every level). An attribute its entity lacks is skipped:
+
+```json
+{ "category": "harmful", "color": 14920280, "attribute_modifiers": [
+  { "attribute": "minecraft:movement_speed", "id": "ruby:effect.glow.movement_speed", "amount": -0.3, "per_level": 0.0,
+    "operation": "add_multiplied_total" } ] }
+```
+
+Anything else it does (its tick, what it makes of a hit) is a native mod's
+([native-mods.md](native-mods.md), API 56). A world opened without the mod drops the effect from its players and mobs. Clients join a server
 only with the same mods' effects, as with its blocks.
 
 A mod fluid is declared in `data/<id>/horizon/fluid/<name>.json`. It copies `minecraft:water` or `minecraft:lava`
@@ -388,7 +400,7 @@ template
 ([#6301](https://github.com/horizon-rust/horizon/issues/6301) adds these step by step).
 
 A mod entity type is declared in `data/<id>/horizon/entity_type/<name>.json`. It copies a vanilla type:
-`minecraft:snowball`, a thrown item projectile, or a living mob (below). A thrown type's `item` is one of the mod's own
+`minecraft:snowball`, a thrown item projectile, a boat, or a living mob (both below). A thrown type's `item` is one of the mod's own
 items (one type per item), and `damage` (0 by default) is what a hit deals to anything it hits, as `thrown` damage from
 the thrower (the snowball's 3 to blazes is not copied):
 
@@ -406,8 +418,29 @@ it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. Not yet: a dispenser doesn't throw it, and a vanilla client on a
 server with it may be disconnected when one spawns.
 
-A living type copies a mob, `minecraft:zombie`, `minecraft:villager` or `minecraft:wandering_trader`, the way NeoForge's
-`EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. The wandering trader is the neutral one whose
+A boat type copies `minecraft:oak_boat`, `minecraft:oak_chest_boat`, `minecraft:bamboo_raft` or
+`minecraft:bamboo_chest_raft`, the way a NeoForge mod's `Boat` subclass with its own `BoatItem` and renderer makes a
+wood's boat. 26.3 has an entity type for each boat, so a mod declares one for each of its woods, and another for the
+one with a chest:
+
+```json
+{ "template": "minecraft:oak_boat", "item": "ruby:elm_boat", "texture": "ruby:entity/boat/elm" }
+```
+
+`item` is one of the mod's own items (one type per item): using it places the boat as a vanilla boat item does, aimed
+at a block or the water, and the boat drops it when broken (`getDropItem`). The item is declared as any other; give it
+`"max_stack_size": 1`, as vanilla's boats have. `texture` is the boat's own texture,
+`assets/<namespace>/textures/<path>.png` written `namespace:path`, laid out as its template's (a boat's 128x64, a
+raft's, each with or without the chest); without it the boat is drawn as its template. It is its template's boat in
+everything else: the model, the box, how it floats, rows and breaks, two seats or one beside the chest, a raft's higher
+seat, the chest's 27 slots and menu, leads, and what it saves, under its own id. Its name is `entity.<id>.<name>`, and
+`/summon <id>:<name>` makes one. It has no `damage`, attributes, size, sounds or food. Not yet: a dispenser doesn't
+place it, and vanilla's boat tags and advancements don't count it unless the mod adds it.
+
+A living type copies a mob, `minecraft:zombie`, `minecraft:villager`, `minecraft:wandering_trader` or `minecraft:cow`, the way NeoForge's
+`EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. The cow is the passive animal (`Animal`): it
+falls in love with its food, breeds, grows up and spawns as animals do, and its behaviour is all goals. A type on it is a
+class of its own to `Animal.canMate`: it mates with its own type, not with cows. The wandering trader is the neutral one whose
 behaviour is all goals, so a native mod's [`register_goals`](native-mods.md#mob-goals) can replace all of it (a citizen,
 a guard, an NPC); its trades on a right click are still a wandering trader's until a native mod answers the
 interaction (`native_interact_entity`). A villager's behaviour is its brain, which stays. It has no `item` or `damage`. `attributes`
@@ -416,6 +449,22 @@ only for attributes the template has; one it lacks stops the content root's buil
 
 ```json
 { "template": "minecraft:zombie", "attributes": { "minecraft:max_health": 40.0, "minecraft:movement_speed": 0.3 } }
+```
+
+A living type may also give its own box (`width`, `height` and `eye_height` in blocks, as `EntityType.Builder.sized`;
+the eyes are at 0.85 of a height given alone), its own sound events (`sounds`: `ambient`, `hurt`, `death` and `step`,
+each `namespace:event` from the mod's `sounds.json`; the step plays at 15% as vanilla's do), the item tag it eats and
+follows (`food`, as `Animal.isFood`) and where it may spawn naturally (`spawn_placement`, what the mod gave
+`SpawnPlacements.register`: `type` is `on_ground`, `in_water`, `in_lava` or `no_restrictions`, `heightmap` one of
+`Heightmap.Types` in lower case (`motion_blocking_no_leaves` when left out), and `rules` the predicate, `animal`
+(`Animal.checkAnimalSpawnRules`: on `#minecraft:animals_spawnable_on`, in the light), `mob`, `monster` or `none`). A
+class its mod registered nothing for spawns anywhere under no rule, as vanilla treats it, so write that one as
+`{ "type": "no_restrictions", "rules": "none" }`: the biome's spawn list, the room for its box and the mob's own
+`checkSpawnRules` still decide. What it leaves out is its template's:
+
+```json
+{ "template": "minecraft:cow", "width": 0.5, "height": 0.9, "food": "c:seeds",
+  "sounds": { "ambient": "ruby:entity.duck.ambient", "step": "ruby:entity.duck.step" } }
 ```
 
 It is a mob of its template's class under its own id, `<id>:<name>`: the template's size, model, texture, sounds and

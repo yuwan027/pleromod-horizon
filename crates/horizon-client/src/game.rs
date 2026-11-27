@@ -112,7 +112,6 @@ mod control;
 mod copper_golems;
 #[cfg(test)]
 mod core_tests;
-mod cosmetics;
 mod creaking;
 mod creative_hotbar;
 mod creative_screen;
@@ -162,15 +161,12 @@ mod foxes;
 mod frame_autotune;
 mod frame_geometry;
 mod frames;
-#[cfg(feature = "friends")]
-mod friends;
 mod held_items;
 #[cfg(test)]
 mod setblock_order_tests;
-// Without Play with Friends: nothing shared, no Friends button (game/friends_off.rs).
 #[cfg(test)]
 mod entity_inside_tests;
-#[cfg(not(feature = "friends"))]
+// No Play with Friends: nothing shared, no Friends button (game/friends_off.rs).
 #[path = "game/friends_off.rs"]
 mod friends;
 mod functions;
@@ -310,6 +306,7 @@ mod native_living_refs;
 mod native_machines;
 mod native_menu_stacks;
 mod native_menus;
+mod native_enchanting;
 mod native_mob_draw;
 mod native_mobs;
 mod native_motion;
@@ -335,6 +332,7 @@ mod native_scene;
 mod native_server;
 mod native_shaders;
 mod native_slot_roles;
+mod native_sound_loops;
 mod native_structures;
 pub(crate) mod native_tasks;
 mod native_terrain_model;
@@ -361,6 +359,8 @@ mod options;
 mod ordered_tick;
 mod packs;
 mod pad;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod play_world;
 mod pad_actions;
 mod pad_craft;
 mod pad_menu;
@@ -604,6 +604,7 @@ pub use native_falling::NativeFalling;
 pub use native_hooks::{NativeClock, NativeItemEntity, NativePlayer, NativeShake};
 pub use native_inventories::{NativeInventoryError, NativeInventoryKind};
 pub use native_item_energy::ItemEnergyBuffer;
+pub use native_enchanting::NativeEnchantOffers;
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_player_state::{NativeAttributeModifier, NativeEffect, NativeEffectV2};
 pub use native_reload_listeners::NativeReloadListener;
@@ -648,8 +649,6 @@ const HELD_FAR_COLUMNS: usize = 1 << 13;
 enum Screen {
     Playing,
     GameModeSwitcher,
-    /// Horizon's emote wheel (`game/cosmetics/emote_wheel.rs`): over the world, not pausing.
-    EmoteWheel,
     Paused,
     Options,
     Chat,
@@ -698,7 +697,6 @@ impl Screen {
         match self {
             Screen::Playing => "playing",
             Screen::GameModeSwitcher => "game_mode_switcher",
-            Screen::EmoteWheel => "emote_wheel",
             Screen::Paused => "paused",
             Screen::Options => "options",
             Screen::Chat => "chat",
@@ -1297,6 +1295,13 @@ impl LevelAccess for GameLevel<'_> {
         state: &mut BlockStateId,
         handled: &mut bool,
     ) {
+        // The shared world keeps what grew: where this tick's writes begin, and whether
+        // the block grows.
+        if let Some(log) = &self.world.play_log {
+            let grows = play_world::grows(&self.facts.get(*state).name);
+            let at = log.len();
+            self.world.play_marks.push((at, Some(grows)));
+        }
         if self.native_authoritative {
             // Any block the hook writes moves the world's revision on.
             let revision = self.world.revision;
@@ -2725,8 +2730,6 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
     skin_slots: horizon_client::skins::SkinSlots,
-    /// Cosmetics on players (game/cosmetics.rs), off by default.
-    cosmetics: cosmetics::Cosmetics,
     /// 3D skin layers: each player's outer layer as one slab per painted
     /// texel, built once per (skin, slim) (`mobs::skin_layers`).
     skin_3d: RefCell<skin_models::SkinModels>,
@@ -2907,9 +2910,6 @@ struct Game<'a> {
     level_shapes: horizon_client::chunk::LevelShapes,
     /// This game is that server thread's (game/integrated.rs).
     serving: Option<integrated::Serving>,
-    /// The open world is shared behind an invite code (game/friends.rs).
-    #[cfg(feature = "friends")]
-    friends: Option<friends::Sharing>,
     /// The Social Interactions screen and the players whose chat is hidden (game/social.rs).
     social: social::Social,
     world_options: Option<lan_screen::WorldOptions>,
@@ -3076,6 +3076,10 @@ struct Game<'a> {
     /// The player and the stack on their cursor as they clicked a native
     /// menu, while `native_menu_clicked` hears it (`native_menu_cursor`).
     native_click_cursor: Option<(u128, Option<horizon_client::items::ItemStack>)>,
+    /// The player, their 36 inventory slots and their off hand as they made a click in their own
+    /// inventory or a vanilla menu, while `native_inventory_click` hears it: the server's players are
+    /// out of reach then (`native_player_stacks`, `native_player_equipment`).
+    native_click_stacks: Option<(u128, Vec<Option<horizon_client::items::ItemStack>>, Option<horizon_client::items::ItemStack>)>,
     /// Where the mods refused to prime TNT: the sound and game event the level
     /// queued right after the prime are dropped (`prime_tnt_event`).
     tnt_refused: Option<BlockPos>,
@@ -3178,6 +3182,11 @@ impl Dim {
             Self::Nether => "minecraft:the_nether",
             Self::End => "minecraft:the_end",
         }
+    }
+    /// Whether a player or an entity may go to this dimension: the browser build has only
+    /// the Overworld, so nothing travels to the Nether or the End there.
+    fn reachable(self) -> bool {
+        !cfg!(target_arch = "wasm32") || self == Self::Overworld
     }
     fn from_id(id: &str) -> Self {
         match id {
@@ -6245,7 +6254,6 @@ impl Game<'_> {
                 );
             }
             Screen::GameModeSwitcher => self.draw_gamemode_switcher(&mut batch),
-            Screen::EmoteWheel => self.draw_emote_wheel(&mut batch),
             Screen::Dead => self.draw_death_screen(&mut batch),
             Screen::Stats => self.draw_stats(&mut batch),
             Screen::Advancements => self.draw_advancements(&mut batch),
@@ -9042,7 +9050,7 @@ impl Game<'_> {
                 horizon_client::level_loading::draw_progress(
                     &mut hud,
                     &self.gui.atlas,
-                    loader.progress.line(),
+                    &loader.progress.line(),
                     loader.progress.fraction(),
                 );
                 pr.lap("pr_loading");
@@ -9059,7 +9067,7 @@ impl Game<'_> {
                 horizon_client::level_loading::draw_loading_overlay(
                     &mut hud,
                     &self.gui.atlas,
-                    reload.progress.line(),
+                    &reload.progress.line(),
                     reload.progress.fraction(),
                     self.settings.file.bool("darkMojangStudiosBackground"),
                 );
@@ -10189,10 +10197,6 @@ impl Game<'_> {
             {
                 self.track_drag_button(*button, *state == ElementState::Pressed);
             }
-            // The emote key let go over the wheel, a click on it.
-            if self.screen == Screen::EmoteWheel && self.emote_wheel_event(&event) {
-                return Ok(());
-            }
             if let WindowEvent::KeyboardInput { event, .. } = &event
                 && event.state == ElementState::Released
                 && let PhysicalKey::Code(key) = event.physical_key
@@ -11176,6 +11180,7 @@ impl Game<'_> {
                         self.tick_sound_engine();
                         // ClientTickEvent.Post, the tick's work done.
                         self.native_client_tick_post();
+                        self.refresh_native_screen_slots();
                         self.clock.record(started.elapsed());
                         if let Some(report) = self.clock.take_sprint_report() {
                             self.sprint_report(&report);
@@ -11781,7 +11786,6 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
-            cosmetics: Default::default(),
             skin_3d: Default::default(),
             trim_slots: Default::default(),
             cart_models: prepared.cart_models,
@@ -11884,8 +11888,6 @@ impl<'a> Game<'a> {
             test_defs_snapshot: false,
             test_highlights: HashMap::new(),
             game_tests: game_tests::GameTests::default(),
-            #[cfg(feature = "friends")]
-            friends: None,
             social: Default::default(),
             debug_keys: Default::default(),
             debug_charts: Default::default(),
@@ -11957,6 +11959,7 @@ impl<'a> Game<'a> {
             lan_acting_name: None,
             lan_acting_uuid: None,
             native_click_cursor: None,
+            native_click_stacks: None,
             tnt_refused: None,
             lan_acting_permission: None,
             lan_acting_spawn_protection: None,
@@ -12337,14 +12340,6 @@ pub fn run_with() -> Result<()> {
         options.spikes = Some(dedicated::SLOW_TICK_MS);
     }
     tick_profile::want_spans(tick_profile::SPANS_SPIKES, options.spikes.is_some());
-    // A player who allows performance statistics also says what their slow frames spent their
-    // time in: this thread, which draws the frames, times its steps (wall time only).
-    if options.execution_role.is_client()
-        && horizon_telemetry::Consent::load(&horizon_client::logging::game_home())
-            .allows(horizon_telemetry::Kind::Perf)
-    {
-        horizon_client::spans::record_here(true);
-    }
     let vanilla_root = options.resources.clone();
     // Saves from before 1.13 upgrade with vanilla's tables, prepared from the player's jar.
     horizon_world::datafix::set_resources(
@@ -12360,6 +12355,15 @@ pub fn run_with() -> Result<()> {
             return no_resources::show(&vanilla_root, &settings);
         }
         return Err(error.into());
+    }
+    // web/build.sh's run of the native game: build the content root the page's game would
+    // build at each of its starts from the mods beside it, say where it is, and stop.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(beside) = std::env::var_os("HORIZON_WEB_CONTENT") {
+        mods::register_components(&vanilla_root)?;
+        let root = mods::web_content_root(&vanilla_root, std::path::Path::new(&beside))?;
+        println!("{}", root.display());
+        return Ok(());
     }
     // Someone is playing: the anonymous ping behind the launcher's "N playing now", and the
     // official server in their list (servers.dat in the game folder, the working directory). Not
@@ -12437,7 +12441,6 @@ pub fn run_with() -> Result<()> {
         loaded.pack_error.or(pack_error),
         audio,
         vanilla_root,
-        started,
         loaded.rest_loader,
         None,
         None,

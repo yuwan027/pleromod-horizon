@@ -4,30 +4,31 @@
 use super::*;
 use horizon_os::fs::PathExt;
 
-pub(super) const STAGE_LINES: [&str; 10] = [
-    "Loading menu",
-    "Loading assets",
-    "Loading block facts",
-    "Loading biomes",
-    "Loading pack tables",
-    "Loading collision",
-    "Loading items",
-    "Loading recipes",
-    "Loading world resources",
-    "World resources ready",
+/// Each stage's line: Horizon's lang key, and its English when the key is missing.
+pub(super) const STAGE_LINES: [(&str, &str); 10] = [
+    ("horizon.loading.menu", "Loading menu"),
+    ("horizon.loading.assets", "Loading assets"),
+    ("horizon.loading.block_facts", "Loading block facts"),
+    ("horizon.loading.biomes", "Loading biomes"),
+    ("horizon.loading.pack_tables", "Loading pack tables"),
+    ("horizon.loading.collision", "Loading collision"),
+    ("horizon.loading.items", "Loading items"),
+    ("horizon.loading.recipes", "Loading recipes"),
+    ("horizon.loading.world_resources", "Loading world resources"),
+    ("horizon.loading.world_ready", "World resources ready"),
 ];
 
 /// The background loader's checkpoint, read by the loading screen each frame.
 #[derive(Clone)]
 pub(super) struct Progress {
     pub(super) value: Arc<AtomicU32>,
-    pub(super) lines: &'static [&'static str],
+    pub(super) lines: &'static [(&'static str, &'static str)],
 }
 impl Progress {
     pub(super) fn new() -> Self {
         Self::with(&STAGE_LINES)
     }
-    pub(super) fn with(lines: &'static [&'static str]) -> Self {
+    pub(super) fn with(lines: &'static [(&'static str, &'static str)]) -> Self {
         Self {
             value: Arc::new(AtomicU32::new(0)),
             lines,
@@ -39,8 +40,11 @@ impl Progress {
     pub(super) fn fraction(&self) -> f32 {
         self.value.load(Ordering::Relaxed) as f32 / (self.lines.len() - 1) as f32
     }
-    pub(super) fn line(&self) -> &'static str {
-        self.lines[(self.value.load(Ordering::Relaxed) as usize).min(self.lines.len() - 1)]
+    /// The stage's line in the selected language.
+    pub(super) fn line(&self) -> String {
+        let (key, english) =
+            self.lines[(self.value.load(Ordering::Relaxed) as usize).min(self.lines.len() - 1)];
+        horizon_client::lang::get_or(key, english)
     }
 }
 
@@ -51,7 +55,6 @@ pub(super) fn synchronous_startup(options: &Options) -> bool {
     options.headless
         || options.frames.is_some()
         || options.world_frames.is_some()
-        || options.benchmark.is_some()
         || options.control.is_some()
         || !options.execution_role.is_client()
         || std::env::var_os("HORIZON_DISPENSE_FIXTURE").is_some()
@@ -495,7 +498,6 @@ pub(super) fn load_resources(
     };
     let resources = Arc::new(resources);
     if menu {
-        horizon_client::telemetry::mark_core_ready();
         log::info!(
             "Horizon: core-ready after {} ms",
             started.elapsed().as_millis()
@@ -535,7 +537,6 @@ pub(super) fn load_resources(
                     .set(rest)
                     .map_err(|_| "world resources already loaded".to_owned())?;
                 progress.set(9);
-                horizon_client::telemetry::mark_rest_ready();
                 log::info!(
                     "Horizon: rest-ready after {} ms",
                     started.elapsed().as_millis()

@@ -669,7 +669,8 @@ impl Game<'_> {
             "minecraft:honeycomb" => self.dispense_honeycomb(pos, facing, stack)?,
             "minecraft:potion" => self.dispense_potion(pos, facing, stack)?,
             _ if item.ends_with("shulker_box") => self.dispense_shulker_box(pos, facing, stack)?,
-            _ if super::boats::any_boat_wood(&item).is_some() => {
+            // Vanilla's boats: a content mod's boat type has no dispense behaviour.
+            _ if item.starts_with("minecraft:") && super::boats::any_boat_wood(&item).is_some() => {
                 self.dispense_boat(pos, facing, stack)
             }
             _ if super::minecarts::CartKind::from_id(&item).is_some() => {

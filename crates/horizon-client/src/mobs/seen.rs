@@ -10,6 +10,10 @@ pub struct Seen {
     pub last_damage: Option<Damage>,
     pub id: u32,
     pub species: Species,
+    /// A content mod's type (its id is not `minecraft:`), by a hash of its
+    /// id, 0 for vanilla's: to `Animal.canMate`, which takes only a partner
+    /// of the same class, a mod's type is a class of its own.
+    pub own_type: u32,
     pub position: Vec3,
     pub bounds: Aabb,
     pub eye_y: f64,
@@ -138,6 +142,17 @@ impl Seen {
         self.effects.contains(&effect)
     }
 }
+/// [`Seen::own_type`] of the entity type `id`.
+pub fn own_type(id: &str) -> u32 {
+    if id.starts_with("minecraft:") {
+        return 0;
+    }
+    // FNV-1a, never 0.
+    id.bytes()
+        .fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
+        .max(1)
+}
+
 impl Mob {
     /// What other mobs see of this one this tick (`_player` is unused: it keyed the villager
     /// reputation that nothing read). Inline: the game's snapshot of every mob writes each one in
@@ -152,6 +167,7 @@ impl Mob {
             last_damage: self.last_damage.map(|(d, _)| d),
             id: m.id,
             species: m.species(),
+            own_type: own_type(&m.kind.id),
             position: m.position,
             bounds: m.bounds(),
             hitbox: m.hitbox(),

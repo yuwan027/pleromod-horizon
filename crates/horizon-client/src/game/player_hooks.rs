@@ -16,13 +16,9 @@ use horizon_hooks::players::{
 };
 use std::sync::Arc;
 
-/// Registers the hooks of the Horizon parts still in this crate (cosmetics: spec #14091 step 5
-/// moves them out). Before the hooks are sealed.
-pub(crate) fn register() {
-    if let Err(e) = super::cosmetics::register() {
-        log::error!("Cosmetics: their hooks came too late: {e}");
-    }
-}
+/// Registers the hooks of the Horizon parts still in this crate: none since cosmetics went.
+/// Before the hooks are sealed.
+pub(crate) fn register() {}
 
 /// The models of the world a window shows: its own first, then the other players and mannequins.
 struct Models<'a> {
@@ -517,26 +513,22 @@ impl Game<'_> {
         if !engine::any() {
             return;
         }
-        self.cosmetics_say();
         let connection = self.remote.as_ref().map_or(0, |r| r.session.serial());
         let frame = Frame::new(connection, self.integrated.is_some());
         engine::frame(&frame, &mut HookStore(self));
         forget_meshes();
         let _ = SEE_THROUGH.try_with(|v| v.borrow_mut().clear());
-        self.cosmetics_frame();
     }
 
-    /// Once a client tick in a world: the player's own emote, then the hooks.
+    /// Once a client tick in a world: the hooks.
     pub(super) fn client_hooks_tick(&mut self) {
         debug_assert!(
             self.serving.is_none(),
             "a server thread calls no client hook"
         );
-        self.tick_emotes();
         if !engine::any() {
             return;
         }
-        self.cosmetics_say();
         let Some(remote) = self.remote.as_ref() else {
             return;
         };

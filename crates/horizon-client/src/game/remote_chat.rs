@@ -89,6 +89,9 @@ enum CommandAccept {
     Suggest,
     /// The same with a screen to come back to: on the clipboard.
     Copy,
+    /// Not a command: the shared world's notice about what blocks cost (`play_world`), whose
+    /// first button closes it and whose second turns it off for good.
+    PlayNotice,
 }
 
 /// The screen a clicked command left, which answering no returns to
@@ -385,6 +388,19 @@ impl Game<'_> {
         self.capture(false);
     }
 
+    /// The shared world's notice about what placing and breaking blocks costs.
+    pub(super) fn open_play_notice(&mut self) {
+        self.command_prompt = Some(CommandPrompt {
+            command: String::new(),
+            message: "horizon.play.notice.body",
+            accept: CommandAccept::PlayNotice,
+            over_screen: false,
+            behind: None,
+            focus: None,
+        });
+        self.capture(false);
+    }
+
     /// The command just clicked left this screen: if it asks, no returns there.
     pub(super) fn command_prompt_returns_to(&mut self, behind: Behind) {
         if let Some(prompt) = self.command_prompt.as_mut() {
@@ -401,6 +417,18 @@ impl Game<'_> {
     /// The confirmation's title, the command in yellow in its message, and
     /// its two buttons.
     fn command_prompt_layout(&self, prompt: &CommandPrompt, size: (f32, f32)) -> Choice {
+        if prompt.accept == CommandAccept::PlayNotice {
+            let mut choice = Choice::new(
+                &self.gui.atlas.font,
+                size,
+                &Text::translate("horizon.play.notice.title", &[]),
+                &Text::translate("horizon.play.notice.body", &[]),
+                2,
+                150.0,
+            );
+            choice.focus = prompt.focus;
+            return choice;
+        }
         let command = Text::literal(&prompt.command).with_color(0xFF_FF55);
         let mut choice = Choice::new(
             &self.gui.atlas.font,
@@ -435,11 +463,14 @@ impl Game<'_> {
                     CommandAccept::Run => "multiplayer.confirm_command.run_command",
                     CommandAccept::Suggest => "multiplayer.confirm_command.suggest_command",
                     CommandAccept::Copy => "chat.copy",
+                    CommandAccept::PlayNotice => "horizon.play.notice.ok",
                 },
                 &[],
             ),
             Text::translate(
-                if prompt.over_screen {
+                if prompt.accept == CommandAccept::PlayNotice {
+                    "horizon.play.notice.never"
+                } else if prompt.over_screen {
                     "gui.back"
                 } else {
                     "gui.cancel"
@@ -458,6 +489,11 @@ impl Game<'_> {
             return;
         };
         match (yes, prompt.accept, prompt.behind) {
+            (true, CommandAccept::PlayNotice, _) => {}
+            (false, CommandAccept::PlayNotice, _) => {
+                self.settings.extras.play_notice_off = true;
+                self.settings.save(&Self::options_path());
+            }
             (true, CommandAccept::Run, _) => {
                 if self.remote.is_some() {
                     self.send(S::ChatCommand(play::ChatCommand {
@@ -491,7 +527,11 @@ impl Game<'_> {
         };
         let mut choice = self.command_prompt_layout(prompt, size);
         match key {
-            KeyCode::Escape => return self.answer_command_prompt(false),
+            // The notice's Escape only closes it.
+            KeyCode::Escape => {
+                let notice = prompt.accept == CommandAccept::PlayNotice;
+                return self.answer_command_prompt(notice);
+            }
             KeyCode::Tab => choice.tab(shift),
             KeyCode::ArrowLeft | KeyCode::ArrowRight => choice.arrow(key == KeyCode::ArrowLeft),
             KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space => {

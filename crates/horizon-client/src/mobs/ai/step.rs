@@ -12,6 +12,12 @@ pub fn step_sound(
     use Species as S;
     let baby = m.is_baby();
     let quiet = |s: &'static str| Some((s, 0.15, 1.0));
+    // A content mod's type steps with its row's sound (its template's without one).
+    if !m.kind.id.starts_with("minecraft:")
+        && let Some(step) = m.kind.step_sound
+    {
+        return quiet(step);
+    }
     match m.species() {
         // `playStepSound` overridden with an empty body: a fish, an allay, a bee,
         // a happy ghast and a nautilus have no footfall of their own, so the

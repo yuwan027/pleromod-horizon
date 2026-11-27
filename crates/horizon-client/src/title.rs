@@ -339,7 +339,6 @@ pub enum Mode {
         alert: Option<Alert>,
     },
     Multiplayer(crate::multiplayer::Screen),
-    Realms(crate::realms::Screen),
     /// SafetyScreen: the warning before the first Multiplayer click, with its
     /// "Do not show this screen again" box.
     MultiplayerWarning {
@@ -425,9 +424,6 @@ pub struct Title {
     caret: RefCell<crate::ui::Caret>,
     scroll: Cell<crate::ui::Scroll>,
     create_return_to_main: bool,
-    /// The Generate New World tile's request while the title shows Create New World
-    /// (`RealmsCreateWorldFlow.createWorld`): its settings upload into the Realm's slot.
-    realms_create: Option<crate::realms::CreateWorldRequest>,
     message_lines: Cell<usize>,
     /// The SafetyScreen's checkbox as last drawn: x, y, width, height.
     warning_check: Cell<[f32; 4]>,
@@ -773,7 +769,6 @@ impl Mode {
     pub fn id(&self) -> &'static str {
         match self {
             Self::Main => "title",
-            Self::Realms(_) => "realms",
             Self::Select { .. } => "world_select",
             Self::Create { .. } => "world_create",
             Self::CreateFlat { .. } => "world_create_flat",
@@ -834,7 +829,6 @@ impl Title {
             caret: RefCell::default(),
             scroll: Cell::default(),
             create_return_to_main: false,
-            realms_create: None,
             message_lines: Cell::new(1),
             warning_check: Cell::new([0.0; 4]),
             credits_button: Cell::new([0.0; 4]),
@@ -967,14 +961,6 @@ impl Title {
             && let Some(dir) = &options.pack_dir
         {
             let _ = horizon_os::fs::remove_dir_all(dir);
-        }
-        if let Some(request) = self.realms_create.take() {
-            // `CreateWorldScreen.openFresh`'s cancel: the screen the reset screen was
-            // opened from (the configuration screen, or the list for a new Realm).
-            let mut screen = crate::realms::Screen::with_saves(Some(self.saves.clone()));
-            screen.cancel_create_world(request);
-            self.mode = Mode::Realms(screen);
-            return;
         }
         if self.create_return_to_main {
             self.mode = Mode::Main;
@@ -1224,9 +1210,6 @@ impl Title {
         if let Some(rules) = self.rules.get_mut() {
             return rules.drag(cursor.1, size.1.ceil());
         }
-        if let Mode::Realms(screen) = &mut self.mode {
-            return screen.drag(cursor, size);
-        }
         if let Mode::Multiplayer(screen) = &mut self.mode {
             return screen.drag(cursor.1, size);
         }
@@ -1250,9 +1233,6 @@ impl Title {
         if let Some(rules) = self.rules.get_mut() {
             rules.release();
         }
-        if let Mode::Realms(screen) = &mut self.mode {
-            screen.release();
-        }
         if let Mode::Multiplayer(screen) = &mut self.mode {
             screen.release(&self.saves);
         }
@@ -1271,10 +1251,6 @@ impl Title {
             return false;
         }
         if let Mode::Multiplayer(screen) = &mut self.mode {
-            screen.wheel(delta, cursor, size);
-            return false;
-        }
-        if let Mode::Realms(screen) = &mut self.mode {
             screen.wheel(delta, cursor, size);
             return false;
         }
@@ -1342,7 +1318,6 @@ impl Title {
     }
     /// Polling is done once per rendered frame so filesystem work never blocks drawing.
     pub fn poll_backup(&mut self) {
-        self.poll_realms();
         self.poll_onboarding(horizon_os::time::Instant::now());
         // Edit Profile's imported pictures come in on the same frames.
         self.poll_profile_file();
@@ -1418,16 +1393,6 @@ impl Title {
     /// Whether the system toast holds the `ToastManager`'s first slot.
     pub fn has_toast(&self) -> bool {
         self.toast.is_some()
-    }
-    /// The world a finished backup made before its upgrade opens next.
-    /// The Realms screen's workers: a join that came back connects (`GetServerDetailsTask`
-    /// handing over to `ConnectScreen`).
-    fn poll_realms(&mut self) {
-        if let Mode::Realms(screen) = &mut self.mode
-            && let crate::realms::Outcome::Connect(address) = screen.poll()
-        {
-            self.connect_request = Some(address);
-        }
     }
     /// The server the Realms screen joins once its address came back.
     pub fn take_connect_request(&mut self) -> Option<Action> {
@@ -1830,69 +1795,6 @@ impl Title {
             options: options.clone(),
         }
     }
-    /// Create New World's Create: a local world normally; while the Realms screen's
-    /// Generate New World tile asked for the screen, its settings go back to that screen
-    /// and upload there (`RealmsCreateWorldFlow.createWorld`), no local world made.
-    fn create_or_upload(&mut self) -> Action {
-        let Some(request) = self.realms_create.take() else {
-            return self.create_action();
-        };
-        let Mode::Create {
-            name,
-            seed,
-            creative,
-            options,
-            ..
-        } = &self.mode
-        else {
-            return Action::None;
-        };
-        let (name, seed, creative, options) =
-            (name.clone(), seed.clone(), *creative, options.clone());
-        let enabled_features = options.enabled_features(&self.resources);
-        let disabled: Vec<String> = crate::datapack::feature_packs(&self.resources)
-            .iter()
-            .map(|pack| pack.id.clone())
-            .filter(|id| !options.data_packs.contains(id))
-            .collect();
-        // `WorldOptions.randomSeed` when no seed was entered.
-        let seed = parse_seed(&seed).unwrap_or_else(|| {
-            let t = horizon_os::time::SystemTime::now()
-                .duration_since(horizon_os::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos() as u64);
-            (t ^ (t >> 29)).wrapping_mul(0x9E37_79B9_7F4A_7C15) as i64
-        });
-        let mut level = Level {
-            name,
-            seed,
-            creative,
-            day_time: 0,
-            health: 20.0,
-            food: 20,
-            saturation: 5.0,
-            ..Level::default()
-        };
-        level.hardcore = options.hardcore;
-        level.difficulty = DIFFICULTIES[options.difficulty()].into();
-        level.allow_commands = Some(options.commands(creative));
-        level.enabled_features = enabled_features.clone();
-        level.game_rules = options
-            .rules
-            .copy_with_features(&enabled_features)
-            .by_name();
-        let world = crate::realms::CreatedWorld {
-            level,
-            world_gen: options.world_gen(),
-            flat_settings: options.flat_settings(),
-            single_biome: options.single_biome().map(str::to_owned),
-            data_packs: (options.data_packs.clone(), disabled),
-            pack_dir: options.pack_dir.clone(),
-        };
-        let mut screen = crate::realms::Screen::with_saves(Some(self.saves.clone()));
-        screen.start_create_world_upload(request, world);
-        self.mode = Mode::Realms(screen);
-        Action::None
-    }
     /// The folder a new world named `name` gets (`findResultFolder`).
     fn target_folder(&self, name: &str) -> String {
         let new_world = lang::get_or("selectWorld.newWorld", "New World");
@@ -1936,22 +1838,15 @@ impl Title {
                         self.allows_multiplayer,
                         4,
                     ),
-                    // The browser build has no Realms: Eaglercraft's Edit
-                    // Profile is there instead.
-                    if cfg!(target_arch = "wasm32") {
-                        b(cx - 100.0, y + 48.0, 200.0, "Edit Profile", true, 8)
-                    } else {
-                        b(
-                            cx - 100.0,
-                            y + 48.0,
-                            200.0,
-                            &lang::get_or("menu.online", "Minecraft Realms"),
-                            // TitleScreen.createNormalMenuOptions: Realms is off when
-                            // multiplayer is.
-                            self.allows_multiplayer,
-                            8,
-                        )
-                    },
+                    // No Realms in this build: Eaglercraft's Edit Profile is there instead.
+                    b(
+                        cx - 100.0,
+                        y + 48.0,
+                        200.0,
+                        &lang::get_or("horizon.profile.title", "Edit Profile"),
+                        true,
+                        8,
+                    ),
                     b(
                         cx - 100.0,
                         y + 96.0,
@@ -2407,15 +2302,6 @@ impl Title {
                     button
                 })
                 .collect(),
-            Mode::Realms(screen) => screen
-                .buttons(w, h)
-                .into_iter()
-                .map(|(x, y, bw, label, enabled, id, icon)| {
-                    let mut btn = b(x, y, bw, &label, enabled, id);
-                    btn.icon = icon;
-                    btn
-                })
-                .collect(),
         }
     }
     /// The screen this mode is, as the narrator reads it: its id and
@@ -2606,15 +2492,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     ),
                 ),
             ),
-            Mode::Realms(screen) => {
-                let info = ScreenInfo::new("realms", lang::get("menu.online"));
-                // `AbstractSelectionList.updateNarration`: the selected entry is a
-                // widget line under the screen title.
-                match screen.narration() {
-                    Some(text) => info.element(crate::widgets::ElementType::Title, 1, text),
-                    None => info,
-                }
-            }
             Mode::Multiplayer(_) => return None,
         };
         Some(info)
@@ -3400,16 +3277,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 cursor,
                 hide_server_address,
             ),
-            Mode::Realms(screen) => screen.draw(
-                batch,
-                atlas,
-                &mut self.caret.borrow_mut(),
-                self.started,
-                cursor,
-                w,
-                h,
-                self.focused_button.is_none(),
-            ),
         }
         // The hovered button's `Tooltip`, drawn once the widgets are.
         let mut button_tooltip = None;
@@ -3484,10 +3351,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 );
             }
         }
-        // RealmsHeader's notification badges sit on their buttons, so they draw after.
-        if let Mode::Realms(screen) = &self.mode {
-            screen.draw_header_badges(atlas, batch, w);
-        }
         if let Some(from) = fade_from {
             self.draw_onboarding_logo(atlas, batch, w, from);
         }
@@ -3505,9 +3368,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
         if let Mode::Multiplayer(screen) = &self.mode {
             screen.draw_tooltip(atlas, batch, cursor);
-        }
-        if let Mode::Realms(screen) = &self.mode {
-            screen.draw_tooltip(atlas, batch, cursor, (w, h));
         }
         // WidgetTooltipHolder.refreshTooltipForNextRenderPass: beside the
         // pointer and kept by its button (`MenuTooltipPositioner`), split at
@@ -3621,10 +3481,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         {
             return None;
         }
-        // The Realms configuration screen's `TabNavigationBar` takes the same keys.
-        if let Mode::Realms(screen) = &mut self.mode {
-            return screen.tab_key(key, ctrl, shift);
-        }
         let Mode::Create { options, .. } = &self.mode else {
             return None;
         };
@@ -3714,8 +3570,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             self.drop_button_focus_for_field(hit);
             return (Action::None, hit.is_some());
         }
-        let sound = hit.is_some()
-            || matches!(&self.mode, Mode::Realms(screen) if screen.reset_tile_at(x, y, (w, h)).is_some());
+        let sound = hit.is_some();
         let action = self.click_action(x, y, (w, h), hit);
         self.drop_button_focus_for_field(hit);
         // World list selection is silent; launching its selected entry sounds.
@@ -3771,43 +3626,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 }
                 self.mode = Mode::Multiplayer(crate::multiplayer::Screen::list(&self.saves));
                 Action::None
-            }
-            // The browser's button 8 is Edit Profile.
-            (Mode::Main, Some(8)) if !cfg!(target_arch = "wasm32") => {
-                // The upload screen lists the game's own worlds (`saves`).
-                self.mode =
-                    Mode::Realms(crate::realms::Screen::from_title(Some(self.saves.clone())));
-                Action::None
-            }
-            (Mode::Realms(screen), hit) => {
-                let outcome = screen.click(hit, x, y, (w, h));
-                // `AbstractSelectionList.mouseClicked`: a row takes the keyboard focus
-                // from the buttons.
-                if screen.take_list_click() {
-                    self.focused_button = None;
-                }
-                match outcome {
-                    crate::realms::Outcome::Back => {
-                        self.mode = Mode::Main;
-                        Action::None
-                    }
-                    crate::realms::Outcome::Connect(address) => Action::Connect {
-                        address,
-                        lan: false,
-                        realm: true,
-                    },
-                    crate::realms::Outcome::OpenUri(uri) => Action::OpenUri(uri),
-                    crate::realms::Outcome::Copy(text) => Action::CopyText(text),
-                    crate::realms::Outcome::CreateWorld(request) => {
-                        // `RealmsCreateWorldFlow.createWorld`: Create New World's settings
-                        // upload into the Realm's slot instead of a local world.
-                        self.realms_create = Some(request);
-                        self.create_return_to_main = false;
-                        self.mode = Self::new_world();
-                        Action::None
-                    }
-                    crate::realms::Outcome::None => Action::None,
-                }
             }
             (Mode::MultiplayerWarning { .. }, Some(71)) => {
                 self.mode = Mode::Main;
@@ -4138,7 +3956,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 *self.experiments.get_mut() = Some(experiments::ExperimentsScreen::new(flags));
                 Action::None
             }
-            (Mode::Create { .. }, Some(21)) => self.create_or_upload(),
+            (Mode::Create { .. }, Some(21)) => self.create_action(),
             (Mode::Create { options, .. }, Some(31)) => {
                 if options.pack_dir.is_none() {
                     match crate::datapack::temp_folder() {
@@ -4172,7 +3990,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
         match &mut self.mode {
             Mode::Multiplayer(screen) => screen.focused_text(),
-            Mode::Realms(screen) => screen.focused_text(),
             mode => caret_field(mode, self.search_focused, &mut self.search),
         }
     }
@@ -4251,7 +4068,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 .map(|(_, rect)| rect),
             Mode::Multiplayer(screen) => screen.focused_box((w, h)),
             Mode::Profile(state) if state.focused => Some(profile_screen::name_rect(w)),
-            Mode::Realms(screen) => screen.focused_box((w, h)),
             Mode::CreateBuffet { buffet, .. } if buffet.query_focused => {
                 Some(buffet::search_box(w))
             }
@@ -4350,26 +4166,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             let sound = matches!(action, Action::Play { .. });
             return (action, sound);
         }
-        // A Realms list has Enter too: `ServerEntry.keyPressed` creates an uninitialized
-        // Realm or plays an open one; the product page's rows do nothing.
-        if self.focused_button.is_none()
-            && let Mode::Realms(screen) = &mut self.mode
-            && screen.list_stop()
-        {
-            return match screen.activate_selected() {
-                crate::realms::Outcome::Connect(address) => (
-                    Action::Connect {
-                        address,
-                        lan: false,
-                        realm: true,
-                    },
-                    true,
-                ),
-                crate::realms::Outcome::OpenUri(uri) => (Action::OpenUri(uri), true),
-                crate::realms::Outcome::Copy(text) => (Action::CopyText(text), true),
-                _ => (Action::None, false),
-            };
-        }
         if let Some(id) = self.focused_button {
             let (w, h) = size;
             let buttons = self.buttons(w, h);
@@ -4380,10 +4176,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             return (Action::None, false);
         }
         if matches!(self.mode, Mode::Create { .. }) {
-            let upload = self.realms_create.is_some();
-            let action = self.create_or_upload();
-            // A press on Create is a button click: the local world, or the upload.
-            let sound = upload || matches!(action, Action::Create { .. });
+            let action = self.create_action();
+            // A press on Create is a button click.
+            let sound = matches!(action, Action::Create { .. });
             return (action, sound);
         }
         match &self.mode {
@@ -4428,41 +4223,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     }
     /// Tab navigation through widgets and fields in either forward or reverse order.
     pub fn tab_dir(&mut self, reverse: bool, size: (f32, f32)) {
-        if let Mode::Realms(screen) = &mut self.mode {
-            // `RealmsScreen`'s buttons take the keyboard like every other screen's: Tab
-            // steps through the enabled ones (`MenuTabBar`'s tabs included). A product
-            // page's list is a stop too, after its last button, as `ObjectSelectionList`
-            // is the screen's contents widget.
-            let (w, h) = size;
-            let enabled: Vec<u8> = screen
-                .buttons(w, h)
-                .iter()
-                .filter(|b| b.4)
-                .map(|b| b.5)
-                .collect();
-            let list = screen.list_stop();
-            let focus = &mut self.focused_button;
-            *focus = match (*focus, reverse) {
-                (Some(cur), false) => match enabled.iter().position(|&id| id == cur) {
-                    Some(pos) => enabled
-                        .get(pos + 1)
-                        .copied()
-                        .or_else(|| if list { None } else { enabled.first().copied() }),
-                    None => enabled.first().copied(),
-                },
-                (Some(cur), true) => match enabled.iter().position(|&id| id == cur) {
-                    Some(pos) => pos
-                        .checked_sub(1)
-                        .and_then(|pos| enabled.get(pos))
-                        .copied()
-                        .or_else(|| if list { None } else { enabled.last().copied() }),
-                    None => enabled.last().copied(),
-                },
-                (None, false) => enabled.first().copied(),
-                (None, true) => enabled.last().copied(),
-            };
-            return;
-        }
         if self.rules.get_mut().is_some() {
             return;
         }
@@ -4624,17 +4384,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             && let Mode::Multiplayer(screen) = &mut self.mode
             && matches!(key, KeyCode::ArrowUp | KeyCode::ArrowDown)
             && screen.arrow(key == KeyCode::ArrowUp, shift, size, &self.saves)
-        {
-            return;
-        }
-        // `RealmsPdpScreen.PdpList` and `RealmsMainScreen`'s server list: the arrows move
-        // through the rows while the list has the focus (`ObjectSelectionList.nextFocusPath`);
-        // the first one takes the near end.
-        if self.focused_button.is_none()
-            && let Mode::Realms(screen) = &mut self.mode
-            && matches!(key, KeyCode::ArrowUp | KeyCode::ArrowDown)
-            && (screen.pdp_arrow(key == KeyCode::ArrowUp)
-                || screen.main_arrow(key == KeyCode::ArrowUp))
         {
             return;
         }
@@ -5005,11 +4754,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         {
             return;
         }
-        if let Mode::Realms(screen) = &mut self.mode
-            && !screen.escape()
-        {
-            return;
-        }
         match &self.mode {
             // OptimizeWorldScreen: `shouldCloseOnEsc` is false; the Backup wait takes no input.
             Mode::Backup { .. } | Mode::Optimize { .. } => {}
@@ -5111,7 +4855,6 @@ fn caret_field<'a>(
         Mode::Profile(state) if state.focused => {
             Some((profile_screen::NAME, &mut state.profile.name, 16))
         }
-        Mode::Realms(screen) => screen.focused_text(),
         Mode::CreateFlat { flat, .. } if flat.page == flat::Page::Presets && flat.share_focused => {
             Some((FLAT_SHARE, &mut flat.share, 1230))
         }
@@ -5153,133 +4896,6 @@ mod classic_tests {
             title.focused_button.is_some(),
             "the next Tab reaches the buttons"
         );
-    }
-
-    /// Tab reaches the Realms screen's buttons too: the focus is the same
-    /// `focused_button` every other screen uses.
-    #[test]
-    fn tab_reaches_the_realms_screens_buttons() {
-        let mut title = Title::new(
-            PathBuf::new(),
-            Path::new("/nonexistent/horizon-test-resources"),
-        );
-        let mut screen = crate::realms::Screen::with_saves(None);
-        screen.state = crate::realms::FetchState::Loaded(Vec::new());
-        title.mode = Mode::Realms(screen);
-        title.focused_button = None;
-        title.tab_dir(false, (854.0, 480.0));
-        assert!(
-            title.focused_button.is_some(),
-            "the first Tab focuses a Realms button"
-        );
-        let first = title.focused_button;
-        title.tab_dir(false, (854.0, 480.0));
-        assert!(title.focused_button.is_some());
-        assert_ne!(title.focused_button, first, "and the next moves on");
-    }
-
-    /// Enter activates the Realms button the keyboard focus is on, the way it
-    /// does on every other screen.
-    #[test]
-    fn enter_presses_the_focused_realms_button() {
-        let mut title = Title::new(
-            PathBuf::new(),
-            Path::new("/nonexistent/horizon-test-resources"),
-        );
-        let mut screen = crate::realms::Screen::with_saves(None);
-        screen.state = crate::realms::FetchState::Loaded(Vec::new());
-        title.mode = Mode::Realms(screen);
-        title.focused_button = Some(13);
-        title.confirm_key_size((854.0, 480.0));
-        let Mode::Realms(screen) = &title.mode else {
-            panic!("still the Realms screen");
-        };
-        assert!(matches!(
-            screen.subscreen,
-            crate::realms::SubScreen::AddRealm { .. }
-        ));
-    }
-
-    /// `RealmsPdpScreen.PdpList`: the arrows move through the product page's rows while the
-    /// list has the focus (`ObjectSelectionList.nextFocusPath`).
-    #[test]
-    fn the_pdp_rows_take_the_arrow_keys() {
-        use winit::keyboard::KeyCode;
-        let mut title = Title::new(
-            PathBuf::new(),
-            Path::new("/nonexistent/horizon-test-resources"),
-        );
-        let mut screen = crate::realms::Screen::with_saves(None);
-        screen.state = crate::realms::FetchState::Loaded(Vec::new());
-        screen.click(Some(13), 0.0, 0.0, (854.0, 480.0));
-        title.mode = Mode::Realms(screen);
-        title.focused_button = None;
-        title.arrow_key(KeyCode::ArrowDown, (854.0, 480.0), false);
-        let Mode::Realms(screen) = &title.mode else {
-            panic!("still the Realms screen");
-        };
-        assert_eq!(screen.pdp_row, Some(0));
-        title.arrow_key(KeyCode::ArrowDown, (854.0, 480.0), false);
-        let Mode::Realms(screen) = &title.mode else {
-            panic!("still the Realms screen");
-        };
-        assert_eq!(screen.pdp_row, Some(1));
-    }
-
-    /// A product page's list is a Tab stop: after its last button Tab goes to the list,
-    /// and Tab from the list goes on to the first button.
-    #[test]
-    fn tab_reaches_the_pdp_list_and_back() {
-        let mut title = Title::new(
-            PathBuf::new(),
-            Path::new("/nonexistent/horizon-test-resources"),
-        );
-        let mut screen = crate::realms::Screen::with_saves(None);
-        screen.state = crate::realms::FetchState::Loaded(Vec::new());
-        screen.click(Some(13), 0.0, 0.0, (854.0, 480.0));
-        title.mode = Mode::Realms(screen);
-        title.focused_button = None;
-        for _ in 0..8 {
-            title.tab_dir(false, (854.0, 480.0));
-            if title.focused_button.is_none() {
-                break;
-            }
-        }
-        assert!(
-            title.focused_button.is_none(),
-            "Tab leaves the last button for the list"
-        );
-        title.tab_dir(false, (854.0, 480.0));
-        assert!(
-            title.focused_button.is_some(),
-            "and Tab leaves the list for the first button"
-        );
-    }
-
-    /// `AbstractSelectionList.mouseClicked`: a click on a product-page row selects it and
-    /// takes the keyboard focus from the buttons.
-    #[test]
-    fn clicking_a_pdp_row_takes_the_keyboard_focus() {
-        let mut title = Title::new(
-            PathBuf::new(),
-            Path::new("/nonexistent/horizon-test-resources"),
-        );
-        let mut screen = crate::realms::Screen::with_saves(None);
-        screen.state = crate::realms::FetchState::Loaded(Vec::new());
-        screen.click(Some(13), 0.0, 0.0, (854.0, 480.0));
-        if let crate::realms::SubScreen::AddRealm { rows, .. } = &screen.subscreen {
-            // The draw fills these in; one row of the PDP's width at the list's top.
-            rows.borrow_mut().push([282.0, 44.0, 290.0, 61.0]);
-        }
-        title.mode = Mode::Realms(screen);
-        title.focused_button = Some(40);
-        let (action, _) = title.click(300.0, 50.0, (854.0, 480.0));
-        assert!(matches!(action, Action::None));
-        assert!(title.focused_button.is_none(), "the list has the focus");
-        let Mode::Realms(screen) = &title.mode else {
-            panic!("still the Realms screen");
-        };
-        assert_eq!(screen.pdp_row, Some(0));
     }
 
     /// Vanilla: clicking an EditBox focuses it, so a button focused earlier stops

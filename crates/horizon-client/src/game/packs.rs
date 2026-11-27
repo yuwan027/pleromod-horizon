@@ -660,11 +660,11 @@ pub(super) struct StagedPack {
 }
 
 /// `LoadingOverlay`'s stage lines for a pack reload, indexed by `progress`.
-const RELOAD_LINES: [&str; 4] = [
-    "Preparing resources",
-    "Loading assets",
-    "Loading pack tables",
-    "Applying resources",
+const RELOAD_LINES: [(&str, &str); 4] = [
+    ("horizon.loading.preparing", "Preparing resources"),
+    ("horizon.loading.assets", "Loading assets"),
+    ("horizon.loading.pack_tables", "Loading pack tables"),
+    ("horizon.loading.applying", "Applying resources"),
 ];
 /// Whether a reload asked for now waits: for the world's resources, or for
 /// the reload already under its overlay (`Minecraft.reloadResourcePacks`

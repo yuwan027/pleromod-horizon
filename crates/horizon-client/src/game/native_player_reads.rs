@@ -190,6 +190,13 @@ impl Game<'_> {
         if self.acting(uuid) {
             return self.native_equipment(slot);
         }
+        // Inside `native_inventory_click`: the hands as the player clicked.
+        if let Some((player, _, offhand)) = &self.native_click_stacks
+            && *player == uuid
+            && matches!(slot, EquipmentSlot::OffHand)
+        {
+            return offhand.clone().filter(|stack| stack.count > 0);
+        }
         let (_, g) = self.hub_guest(uuid)?;
         match slot {
             EquipmentSlot::MainHand => g.inventory.get(g.selected).cloned().flatten(),

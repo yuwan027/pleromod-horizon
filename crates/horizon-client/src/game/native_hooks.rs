@@ -824,13 +824,14 @@ use super::{
     maps::{NativeMapDecoration, NativeMapInfo},
     native_block_entity_draw::BlockEntityDraw,
     native_configs::{NativeConfig, NativeConfigFile},
+    native_enchanting::NativeEnchantOffers,
     native_mob_draw::{NativeMobRender, NativeNameTag, NativePlayerLook, NativePlayerRender},
     native_panel_recipes::RecipePage,
     native_reload_listeners::NativeReloadListener,
     native_world_draw::NativeWorldDraw,
 };
 use crate::mod_api::NativeTextField;
-use horizon_assets::item_model::StackView;
+use horizon_assets::item_model::{DisplayContext, StackView};
 use horizon_client::mod_api::EntityDataValue;
 pub(crate) use horizon_client::mod_api::NativeLootOdds;
 use horizon_client::mod_api::{
@@ -1735,6 +1736,8 @@ pub(super) struct OpenNativeScreen {
     screen: NativeScreen,
     data: Vec<i32>,
     extra: Option<horizon_protocol::menu_extra::Message>,
+    /// What the mods say of the container's slots now (`native_menu_slot_state`), asked each client tick.
+    states: Vec<horizon_client::menu::ModSlotState>,
 }
 
 impl OpenNativeScreen {
@@ -1746,6 +1749,10 @@ impl OpenNativeScreen {
             None if self.key.0 != i32::MIN => Some([self.key.0, self.key.1, self.key.2]),
             None => None,
         }
+    }
+    /// Whether its mod has container slot `slot` there now.
+    fn slot_shown(&self, slot: usize) -> bool {
+        self.states.get(slot).is_none_or(|state| state.shown)
     }
     /// Data slot `id` of window `window`'s menu: false for another window's
     /// (an old or replaced one), which this screen leaves alone.
@@ -2913,6 +2920,28 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_entity_outline(self, mod_api::mods(), entity_id, kind, outline);
     }
+    /// An item held in a hand is about to be drawn in the world: `stack`, in
+    /// `display` (the first person's hands and, on any player or mob that
+    /// holds one, the third person's, or `Head` for a spyglass at the eye).
+    /// This is where a NeoForge mod's `IClientItemExtensions.getCustomRenderer`
+    /// draws an item whose model is `builtin/entity`
+    /// (`BlockEntityWithoutLevelRenderer.renderByItem`): draw the stack
+    /// yourself under `draw`'s pose with the helpers a block entity draws with
+    /// (`native_draw_quad`, `native_draw_cube`, `native_draw_model`) and set
+    /// `drawn`, and the item's own model is left out. The pose is where
+    /// `ItemRenderer.render` starts for the stack, before its model's display
+    /// transform: apply the transform your model has for `display`, then
+    /// draw. `draw.light` is the holder's light. Asked each frame for each held
+    /// stack of a mod's item (never for `minecraft:` items), on the client.
+    pub(super) fn native_item_submit(
+        &self,
+        stack: &ItemStack,
+        display: DisplayContext,
+        draw: &mut BlockEntityDraw,
+        drawn: &mut bool,
+    ) {
+        mod_api::dispatch_item_submit(self, mod_api::mods(), stack, display, draw, drawn);
+    }
     /// Before one first-person hand and its displayed stack are drawn (RenderHandEvent).
     /// Equip progress is the inverse arm height, including the item's swap animation scale.
     /// Cancel skips that hand's default geometry, including its map and arm geometry.
@@ -3797,6 +3826,24 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_mob_submit(self, mod_api::mods(), mob, draw, drawn);
     }
+    /// The scale a living entity's vanilla model is drawn at this frame, along x, y and z
+    /// from its feet: `poseStack.scale` in `LivingEntityRenderer.render`, right after its
+    /// `pushPose` (before the model's own scale and turns, so y is up and x and z the level's).
+    /// `scale` arrives 1, 1, 1; multiply into it. Asked on the client once a frame for every
+    /// mob in view that vanilla draws and for every player (`player` is their UUID where the
+    /// game knows it, this window's own included), with the entity's id and type. The model,
+    /// its armour, held items and other layers scale together; the name tag, shadow and box do
+    /// not, and a mob a mod draws itself (`native_mob_submit`) is not asked.
+    /// @API:living_render_scale@.
+    pub(super) fn native_living_render_scale(
+        &self,
+        entity: u32,
+        kind: &str,
+        player: Option<u128>,
+        scale: &mut [f32; 3],
+    ) {
+        mod_api::dispatch_living_render_scale(self, mod_api::mods(), entity, kind, player, scale);
+    }
     /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
     /// mod that hooks either hooks this one too and sets `listened` (HEAD,
     /// `*listened = true`). Without it the game poses no player or mob for
@@ -4626,6 +4673,75 @@ impl Game<'_> {
             stack,
             handled,
         );
+    }
+    /// Container slot `slot` of the menu of the mod block `block` at `pos`, as
+    /// it is right now: `Slot.mayPickup`, `Slot.mayPlace` (the part that
+    /// depends on the block, not on the stack: `native_menu_slot_rules` has
+    /// that) and `Slot.isActive`, which a NeoForge mod's own `Slot` overrides
+    /// to lock a machine's slots while it runs or to leave out a result slot
+    /// with nothing in it. All three arrive true: clear what your block
+    /// refuses. A slot that is not `shown` is not drawn and takes no click or
+    /// shift-click; one that may not be picked up gives nothing to a click, a
+    /// key or a double click; one that may not be placed into takes nothing.
+    /// `data` is the menu's data slots (the block entity's `data` on the
+    /// server, what arrived of it on a client) and `filled` whether the slot
+    /// holds something; read the rest from the block entity
+    /// (`native_mod_block_entity(pos)`, a client's copy has its update tag).
+    /// Asked on the server for every container slot before each click in the
+    /// menu, and on a client once a tick while the screen is open, so that
+    /// the screen and its predicted clicks agree with the server: answer the
+    /// same on both.
+    pub(super) fn native_menu_slot_state(
+        &self,
+        block: &str,
+        pos: [i32; 3],
+        data: &[i32],
+        slot: usize,
+        filled: bool,
+        may_pickup: &mut bool,
+        may_place: &mut bool,
+        shown: &mut bool,
+    ) {
+        mod_api::dispatch_menu_slot_state(
+            self,
+            mod_api::mods(),
+            block,
+            pos,
+            data,
+            slot,
+            filled,
+            may_pickup,
+            may_place,
+            shown,
+        );
+    }
+    /// What the mods say of each container slot of the mod block's menu at
+    /// `pos` (`native_menu_slot_state`), from slot 0.
+    pub(super) fn mod_slot_states(
+        &self,
+        block: &str,
+        pos: [i32; 3],
+        data: &[i32],
+        filled: &[bool],
+    ) -> Vec<horizon_client::menu::ModSlotState> {
+        filled
+            .iter()
+            .enumerate()
+            .map(|(slot, &filled)| {
+                let mut state = horizon_client::menu::ModSlotState::default();
+                self.native_menu_slot_state(
+                    block,
+                    pos,
+                    data,
+                    slot,
+                    filled,
+                    &mut state.may_pickup,
+                    &mut state.may_place,
+                    &mut state.shown,
+                );
+                state
+            })
+            .collect()
     }
     /// The commands native mods add to the server's command tree: push
     /// yours. Asked once when a world opens to players (a dedicated
@@ -6388,6 +6504,52 @@ impl Game<'_> {
         costs: &mut [i32; 3],
     ) {
         mod_api::dispatch_prepare_item_enchant(self, mod_api::mods(), player, name, pos, costs);
+    }
+    /// An enchanting table's offers for `item`, the stack in its slot at `pos`, where
+    /// `EnchantmentMenu.slotsChanged` begins (a mixin at its head): set `offers.replaced` with
+    /// your own `costs` and `clues` and vanilla's are not worked out, so an item that is not
+    /// enchantable can have an offer. `offers.ignores_level` and `offers.tooltip` are what
+    /// `EnchantmentScreen` shows of them: no offer greyed out for levels, and your lines over a
+    /// hovered one. Asked on the server whenever the slot changes, and again on a client for its
+    /// own screen (a server's data slots carry only costs and clues): answer the same on both.
+    /// The click is `native_enchant_click`. @API:enchant_table@.
+    pub(super) fn native_enchant_offers(
+        &self,
+        pos: [i32; 3],
+        item: &ItemStack,
+        offers: &mut NativeEnchantOffers,
+    ) {
+        mod_api::dispatch_enchant_offers(self, mod_api::mods(), pos, item, offers);
+    }
+    /// A server player pressed button `button` (0 to 2) of the enchanting table at `pos`, where
+    /// `EnchantmentMenu.clickMenuButton` begins (a mixin at its head), before any of vanilla's
+    /// checks: `slots` are the item and the lapis slot, `creative` the player's `instabuild`.
+    /// Set `taken` to answer for the menu (`Some(false)` refuses the click) and vanilla enchants
+    /// nothing; with `Some(true)` the stacks you left in `slots` are the menu's, and its offers
+    /// are made again. No level, lapis or statistic is charged for you, and no sound plays: do
+    /// what your click does with the helpers, which answer for that player
+    /// (`native_acting_player`). @API:enchant_table@.
+    pub(super) fn native_enchant_click(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        button: i32,
+        creative: bool,
+        slots: &mut [Option<ItemStack>; 2],
+        taken: &mut Option<bool>,
+    ) {
+        mod_api::dispatch_enchant_click(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            pos,
+            button,
+            creative,
+            slots,
+            taken,
+        );
     }
     /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. 288.
     pub(super) fn native_prepare_anvil(
@@ -13169,6 +13331,7 @@ impl Game<'_> {
                 screen,
                 data: Vec::new(),
                 extra,
+                states: Vec::new(),
             });
         }
     }
@@ -13206,15 +13369,17 @@ impl Game<'_> {
             .get(slot)
             .copied()
             .flatten()
+            .filter(|_| s.slot_shown(slot))
             .map(|p| (p[0], p[1]))
     }
-    /// The container slots the open mod screen shows (300.. ids).
+    /// The container slots the open mod screen shows (300.. ids): those it
+    /// lays out, less the ones its mod says are not there now.
     pub(super) fn native_screen_slots(&self) -> Option<Vec<usize>> {
         let s = self.shown_native_screen()?;
         let shown = s.screen.slots.iter().enumerate();
         Some(
             shown
-                .filter(|(_, p)| p.is_some())
+                .filter(|(i, p)| p.is_some() && s.slot_shown(*i))
                 .map(|(i, _)| 300 + i)
                 .collect(),
         )
@@ -13223,7 +13388,40 @@ impl Game<'_> {
     /// it (`Game::slot_count` asks every frame).
     pub(super) fn native_screen_slot_count(&self) -> Option<usize> {
         let s = self.shown_native_screen()?;
-        Some(s.screen.slots.iter().filter(|p| p.is_some()).count())
+        let shown = s.screen.slots.iter().enumerate();
+        Some(
+            shown
+                .filter(|(i, p)| p.is_some() && s.slot_shown(*i))
+                .count(),
+        )
+    }
+    /// What the mods say of the open mod screen's container slots, for the
+    /// menu that predicts this client's clicks.
+    pub(super) fn native_screen_slot_states(&self) -> Vec<horizon_client::menu::ModSlotState> {
+        self.shown_native_screen()
+            .map_or_else(Vec::new, |s| s.states.clone())
+    }
+    /// Asks the mods what the open mod screen's container slots are like now
+    /// (`native_menu_slot_state`), once a client tick.
+    pub(super) fn refresh_native_screen_slots(&mut self) {
+        let Some((block, pos, data, count)) = self.shown_native_screen().and_then(|s| {
+            Some((
+                s.block.clone(),
+                s.pos()?,
+                s.data.clone(),
+                s.screen.slots.len(),
+            ))
+        }) else {
+            return;
+        };
+        let stacks = self.native_menu_stacks().unwrap_or_default();
+        let filled: Vec<bool> = (0..count)
+            .map(|slot| stacks.get(slot).is_some_and(Option::is_some))
+            .collect();
+        let states = self.mod_slot_states(&block, pos, &data, &filled);
+        if let Some(s) = self.mod_screen.as_mut() {
+            s.states = states;
+        }
     }
     /// The first row of the player's inventory on the open mod screen.
     pub(super) fn native_screen_inventory_y(&self) -> Option<f32> {
@@ -13630,7 +13828,13 @@ fn config_dir(game_dir: &Path) -> Result<PathBuf, String> {
 /// Whether `native_play_local_sound` takes these values: a sound event's id
 /// (`sound_id`, as `native_play_sound` takes), a finite position, a volume
 /// and pitch at or above 0, and a delay of a minute at most.
-fn local_sound_ok(sound: &str, at: [f64; 3], volume: f32, pitch: f32, delay: i32) -> bool {
+pub(super) fn local_sound_ok(
+    sound: &str,
+    at: [f64; 3],
+    volume: f32,
+    pitch: f32,
+    delay: i32,
+) -> bool {
     sound_id(sound)
         && at.iter().all(|v| v.is_finite() && v.abs() <= 30_000_000.0)
         && volume.is_finite()

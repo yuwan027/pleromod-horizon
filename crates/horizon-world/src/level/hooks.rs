@@ -589,10 +589,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if same {
             return;
         }
-        if matches!(
-            self.level.level_key(),
-            super::LevelKey::OVERWORLD | super::LevelKey::NETHER
-        ) && let Some(shape) = self.find_empty_portal_shape(pos, true)
+        // The browser build has no Nether: no frame lights there.
+        if !cfg!(target_arch = "wasm32")
+            && matches!(
+                self.level.level_key(),
+                super::LevelKey::OVERWORLD | super::LevelKey::NETHER
+            )
+            && let Some(shape) = self.find_empty_portal_shape(pos, true)
         {
             self.create_portal_blocks(&shape);
             return;

@@ -19,6 +19,8 @@ pub mod fs;
 pub mod net;
 mod size_classes;
 #[cfg(target_arch = "wasm32")]
+pub mod play;
+#[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_arch = "wasm32")]
 pub mod workers;
@@ -71,64 +73,18 @@ pub mod time {
     }
 }
 
-/// std's threads. On the page, scoped threads run one after another on the
-/// caller's and sleeping on the page's thread returns at once (it may not
-/// block). Other threads start as Web Workers ([`crate::workers`]).
+/// std's threads. On the page, a scope's threads are jobs for the workers that serve them
+/// ([`crate::workers::scoped`]); one nobody has started when it is joined runs on the joining
+/// thread, as all of them do on the page's own thread or before a pool serves them. Sleeping on
+/// the page's thread returns at once (it may not block). Other threads start as Web Workers
+/// ([`crate::workers`]).
 pub mod thread {
     pub use std::thread::*;
 
     #[cfg(target_arch = "wasm32")]
+    pub use crate::workers::scoped::{Scope, ScopedJoinHandle, scope};
+    #[cfg(target_arch = "wasm32")]
     pub use crate::workers::{Builder, JoinHandle, Thread, available_parallelism, sleep, spawn};
-    #[cfg(target_arch = "wasm32")]
-    pub use sequential::{Scope, ScopedJoinHandle, scope};
-
-    #[cfg(target_arch = "wasm32")]
-    mod sequential {
-        use std::marker::PhantomData;
-
-        pub struct Scope<'scope, 'env: 'scope> {
-            _scope: PhantomData<&'scope mut &'scope ()>,
-            _env: PhantomData<&'env mut &'env ()>,
-        }
-
-        pub struct ScopedJoinHandle<'scope, T> {
-            result: T,
-            _scope: PhantomData<&'scope ()>,
-        }
-
-        impl<'scope, 'env> Scope<'scope, 'env> {
-            /// Runs `f` now and keeps what it returns for `join`.
-            pub fn spawn<F, T>(&'scope self, f: F) -> ScopedJoinHandle<'scope, T>
-            where
-                F: FnOnce() -> T + Send + 'scope,
-                T: Send + 'scope,
-            {
-                ScopedJoinHandle {
-                    result: f(),
-                    _scope: PhantomData,
-                }
-            }
-        }
-
-        impl<T> ScopedJoinHandle<'_, T> {
-            pub fn join(self) -> std::thread::Result<T> {
-                Ok(self.result)
-            }
-            pub fn is_finished(&self) -> bool {
-                true
-            }
-        }
-
-        pub fn scope<'env, F, T>(f: F) -> T
-        where
-            F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
-        {
-            f(&Scope {
-                _scope: PhantomData,
-                _env: PhantomData,
-            })
-        }
-    }
 }
 
 /// std's timed waits that read std's clock, which panics on the web: there

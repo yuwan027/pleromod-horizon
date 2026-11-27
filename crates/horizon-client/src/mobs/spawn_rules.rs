@@ -231,9 +231,108 @@ pub fn is_valid_empty_spawn<L: SpawnLevel>(s: Species, l: &L, x: i32, y: i32, z:
         && f.fluid == Fluid::None
         && !l.block_tag("minecraft:prevent_mob_spawning_inside", block)
 }
+/// The spawn predicate a content mod's type registered
+/// ([`OwnPlacement::rules`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnRules {
+    /// `Animal.checkAnimalSpawnRules`.
+    Animal,
+    /// `Mob.checkMobSpawnRules`.
+    Mob,
+    /// `Monster.checkMonsterSpawnRules`.
+    Monster,
+    /// No predicate: `SpawnPlacements.checkSpawnRules` passes a type
+    /// nothing was registered for.
+    None,
+}
+/// What a content mod's living type registered with `SpawnPlacements`
+/// (its row's `spawn_placement`, docs/mods.md), in place of its template's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnPlacement {
+    pub placement: data::Placement,
+    pub heightmap: super::spawn_selection::Heightmap,
+    pub rules: OwnRules,
+}
+impl OwnPlacement {
+    /// A row's `spawn_placement`; None for one it does not have, or with a
+    /// name this build does not know.
+    pub fn of_row(row: &serde_json::Value) -> Option<Self> {
+        use super::spawn_selection::Heightmap;
+        let row = row.as_object()?;
+        Some(Self {
+            placement: match row.get("type")?.as_str()? {
+                "on_ground" => data::Placement::OnGround,
+                "in_water" => data::Placement::InWater,
+                "in_lava" => data::Placement::InLava,
+                "no_restrictions" => data::Placement::NoRestrictions,
+                _ => return None,
+            },
+            heightmap: match row.get("heightmap").and_then(|h| h.as_str()) {
+                Some(name) => Heightmap::from_name(&name.to_ascii_uppercase()),
+                None => Heightmap::MotionBlockingNoLeaves,
+            },
+            rules: match row.get("rules")?.as_str()? {
+                "animal" => OwnRules::Animal,
+                "mob" => OwnRules::Mob,
+                "monster" => OwnRules::Monster,
+                "none" => OwnRules::None,
+                _ => return None,
+            },
+        })
+    }
+}
+/// [`is_spawn_position_ok`] of a type that may have its own registration.
+pub fn is_spawn_position_ok_as<L: SpawnLevel>(
+    own: Option<OwnPlacement>,
+    s: Species,
+    l: &L,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> bool {
+    match own {
+        Some(own) => position_ok(own.placement, s, l, x, y, z),
+        None => is_spawn_position_ok(s, l, x, y, z),
+    }
+}
+/// [`check_spawn_rules`] of a type that may have its own registration.
+#[allow(clippy::too_many_arguments)]
+pub fn check_spawn_rules_as<L: SpawnLevel>(
+    own: Option<OwnPlacement>,
+    s: Species,
+    l: &L,
+    reason: Reason,
+    random: &mut impl RandomSource,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> bool {
+    let Some(own) = own else {
+        return check_spawn_rules(s, l, reason, random, x, y, z);
+    };
+    if !allowed_in_peaceful(s) && l.peaceful() {
+        return false;
+    }
+    match own.rules {
+        OwnRules::Animal => animal_rules(l, reason, "minecraft:animals_spawnable_on", x, y, z),
+        OwnRules::Mob => mob_rules(s, l, reason, x, y, z),
+        OwnRules::Monster => monster_rules(s, l, reason, random, x, y, z),
+        OwnRules::None => true,
+    }
+}
 /// `SpawnPlacements.isSpawnPositionOk`.
 pub fn is_spawn_position_ok<L: SpawnLevel>(s: Species, l: &L, x: i32, y: i32, z: i32) -> bool {
-    let placement = l.mob_data().species_placement(s);
+    position_ok(l.mob_data().species_placement(s), s, l, x, y, z)
+}
+/// `SpawnPlacementType.isSpawnPositionOk` of a placement type.
+fn position_ok<L: SpawnLevel>(
+    placement: data::Placement,
+    s: Species,
+    l: &L,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> bool {
     if placement != data::Placement::NoRestrictions && !l.within_world_border(x, z) {
         return false;
     }
@@ -745,6 +844,82 @@ mod light_draw_tests {
                         rolls[0] >= level.sky_light(0, 70, 0) && light <= test,
                         "{type_id}"
                     );
+                }
+            },
+        );
+    }
+}
+
+#[cfg(test)]
+mod own_placement_tests {
+    use super::*;
+    use crate::mobs::spawn_selection::Heightmap;
+    use crate::mobs::world::with_built_test_world;
+    use horizon_core::random::LegacyRandom;
+
+    /// A content mod's type is placed by its row's `spawn_placement`, not its
+    /// template's: one registered with nothing goes where a cow may not, and
+    /// one registered as an animal goes where a cow does.
+    #[test]
+    fn a_mod_type_spawns_by_its_own_registration() {
+        let row = |text: &str| OwnPlacement::of_row(&serde_json::from_str(text).unwrap());
+        let unregistered = row(r#"{"type": "no_restrictions", "heightmap": "motion_blocking_no_leaves", "rules": "none"}"#);
+        assert_eq!(
+            unregistered,
+            Some(OwnPlacement {
+                placement: data::Placement::NoRestrictions,
+                heightmap: Heightmap::MotionBlockingNoLeaves,
+                rules: OwnRules::None,
+            })
+        );
+        let animal = row(r#"{"type": "on_ground", "heightmap": "world_surface", "rules": "animal"}"#);
+        assert_eq!(
+            animal,
+            Some(OwnPlacement {
+                placement: data::Placement::OnGround,
+                heightmap: Heightmap::WorldSurface,
+                rules: OwnRules::Animal,
+            })
+        );
+        assert_eq!(row(r#"{"type": "on_ground", "rules": "animal"}"#).map(|own| own.heightmap), Some(Heightmap::MotionBlockingNoLeaves));
+        // A row without one, or with a name this build does not know, has none.
+        assert_eq!(row("null"), None);
+        assert_eq!(row(r#"{"type": "in_honey", "rules": "none"}"#), None);
+        assert_eq!(row(r#"{"type": "on_ground", "rules": "bees"}"#), None);
+        with_built_test_world(
+            &[],
+            |world, registry| {
+                world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                );
+                let state = |name: &str| registry.default_state(name).unwrap();
+                world.set(0, 63, 0, state("minecraft:grass_block")).unwrap();
+                world.set(1, 63, 0, state("minecraft:sand")).unwrap();
+                world.set(2, 63, 0, state("minecraft:water")).unwrap();
+            },
+            |w, _| {
+                let cow = Species::Cow;
+                let rules = |own, x: i32, y: i32| {
+                    let mut random = LegacyRandom::new(1);
+                    check_spawn_rules_as(own, cow, w, Reason::Natural, &mut random, x, y, 0)
+                };
+                // On sand, above water and in the air a cow is refused, by its
+                // placement or its rules; a type registered with nothing is not.
+                for (x, y) in [(1, 64), (2, 64), (0, 80)] {
+                    let as_cow = is_spawn_position_ok(cow, w, x, y, 0) && rules(None, x, y);
+                    assert!(!as_cow, "a cow at {x} {y}");
+                    assert!(is_spawn_position_ok_as(unregistered, cow, w, x, y, 0) && rules(unregistered, x, y));
+                }
+                // Registered as the cow's own class is, it is placed as a cow everywhere.
+                let as_animal = row(r#"{"type": "on_ground", "rules": "animal"}"#);
+                for (x, y) in [(0, 64), (1, 64), (2, 64), (0, 80)] {
+                    assert_eq!(
+                        is_spawn_position_ok_as(as_animal, cow, w, x, y, 0),
+                        is_spawn_position_ok(cow, w, x, y, 0),
+                        "{x} {y}"
+                    );
+                    assert_eq!(rules(as_animal, x, y), rules(None, x, y), "{x} {y}");
                 }
             },
         );

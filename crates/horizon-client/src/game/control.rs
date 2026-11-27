@@ -980,23 +980,6 @@ impl Game<'_> {
                 self.previous_position = to;
                 ok()
             }
-            "emote" => match words.get(1).copied() {
-                None => {
-                    let owned: Vec<String> =
-                        self.owned_emotes().iter().map(|i| i.id.clone()).collect();
-                    Ok(Some(
-                        json!({ "owned": owned, "playing": self.emote_playing() }),
-                    ))
-                }
-                Some("stop") => {
-                    self.stop_emote();
-                    ok()
-                }
-                Some(id) if self.play_emote(id) => ok(),
-                Some(id) => {
-                    Err(format!("can't play emote {id} now (not owned, or not standing)").into())
-                }
-            },
             "hotbar" => {
                 let slot: usize = arg(1)?.parse()?;
                 if !(1..=9).contains(&slot) {
@@ -1468,7 +1451,6 @@ impl Game<'_> {
         match self.screen {
             Screen::Playing => "playing",
             Screen::GameModeSwitcher => "gamemode-switcher",
-            Screen::EmoteWheel => "emote-wheel",
             Screen::Paused => "paused",
             Screen::Options => "options",
             Screen::Inventory => "inventory",
@@ -1959,52 +1941,6 @@ mod tests {
             "key nope up",
         ] {
             assert_eq!(released_modifier(line), None, "{line}");
-        }
-    }
-
-    #[test]
-    fn a_benchmark_profile_only_goes_with_a_benchmark() {
-        let parse = |args: &[&str]| {
-            super::super::Options::parse(args.iter().map(|a| a.to_string())).map(|o| o.unwrap())
-        };
-        assert!(
-            parse(&["--benchmark", "village", "--profile"])
-                .unwrap()
-                .benchmark_profile
-        );
-        assert!(
-            !parse(&["--benchmark", "village"])
-                .unwrap()
-                .benchmark_profile
-        );
-        assert!(parse(&["--profile"]).is_err());
-    }
-
-    #[test]
-    fn a_benchmark_set_only_goes_with_the_trip() {
-        let parse = |args: &[&str]| {
-            super::super::Options::parse(args.iter().map(|a| a.to_string())).map(|o| o.unwrap())
-        };
-        let set = parse(&["--benchmark", "travel", "--benchmark-set", "gpu-culling=on"]).unwrap();
-        assert_eq!(set.benchmark_set, Some(("gpu-culling".into(), "on".into())));
-        let before = parse(&["--benchmark-set", "gpu-culling=on", "--benchmark", "travel"]);
-        assert!(before.is_ok());
-        for args in [
-            &[
-                "--benchmark",
-                "standard",
-                "--benchmark-set",
-                "gpu-culling=on",
-            ][..],
-            &["--benchmark-set", "gpu-culling=on"],
-            &[
-                "--benchmark",
-                "travel",
-                "--benchmark-set",
-                "gpu-culling=auto",
-            ],
-        ] {
-            assert!(parse(args).is_err(), "{args:?}");
         }
     }
 }

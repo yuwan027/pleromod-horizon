@@ -18,8 +18,9 @@ use zip::{CompressionMethod, ZipArchive};
 /// bomb stops here.
 const MAX_ENTRY: usize = 1 << 30;
 /// The most every entry inflates to together, once per archive: per-entry
-/// limits still let a bomb spend its budget one 1 GiB entry at a time.
-const MAX_TOTAL: usize = 4 << 30;
+/// limits still let a bomb spend its budget one 1 GiB entry at a time. A u64:
+/// as a usize it is 0 on wasm32, where every entry would be refused.
+const MAX_TOTAL: u64 = 4 << 30;
 
 /// One archive with its entries indexed by name (`\` read as `/`), files
 /// and folders apart.
@@ -159,7 +160,7 @@ impl Zip {
             entries,
             folders,
             len,
-            budget: AtomicU64::new(MAX_TOTAL as u64),
+            budget: AtomicU64::new(MAX_TOTAL),
         })
     }
     /// The central directory on, as read at opening: every entry's name, sizes

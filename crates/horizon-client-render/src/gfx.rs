@@ -2687,6 +2687,7 @@ impl Renderer {
                 size,
                 previous.map(|renderer| renderer.config.present_mode),
                 previous.is_none(),
+                previous.is_some(),
             )?),
             (None, _) => None,
         };
@@ -6571,9 +6572,7 @@ impl Renderer {
         if device_lost.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("the graphics device was lost".into());
         }
-        if let Some(hdr) = hdr {
-            horizon_hdr::set_metadata(device, surface, hdr.declared_peak(), hdr.black);
-        }
+        let _ = hdr;
         Ok(())
     }
     /// Configures the window surface again. One that fails is still the one
@@ -6605,14 +6604,7 @@ impl Renderer {
         }
         let declared = hdr.declared_peak();
         hdr.calibration = calibration;
-        if hdr.declared_peak() != declared {
-            self.send_hdr_metadata();
-        }
-    }
-    fn send_hdr_metadata(&self) {
-        if let (Some(surface), Some(hdr)) = (&self.surface, &self.hdr) {
-            horizon_hdr::set_metadata(&self.device, surface, hdr.declared_peak(), hdr.black);
-        }
+        let _ = declared;
     }
     /// This renderer's output as applied, with what its destination offers and reports.
     pub fn output(&self) -> output::EffectiveOutput {
@@ -13951,13 +13943,10 @@ mod sprite_upload_tests {
     }
 }
 
-/// What the system says about the window's display, kept up to date: on Wayland, the
-/// compositor's preferred image description of the surface; elsewhere what wgpu reads
+/// What the system says about the window's display, kept up to date: what wgpu reads
 /// from the OS (on Windows, DXGI's luminances and the SDR white level).
 #[derive(Default)]
 struct DisplayWatch {
-    #[cfg(target_os = "linux")]
-    wayland: Option<horizon_hdr::wayland::Watch>,
     /// Without Wayland's event, when to read wgpu's values again: the OS sends no event for
     /// a moved window or a changed SDR brightness slider.
     polled: Option<horizon_os::time::Instant>,
@@ -13999,22 +13988,10 @@ impl DisplayWatch {
         surface: Option<&wgpu::Surface>,
         adapter: &wgpu::Adapter,
     ) -> (Self, DisplayReading) {
-        #[cfg(target_os = "linux")]
-        if surface.is_some()
-            && let Some((wayland, now)) = horizon_hdr::wayland::Watch::new(window)
-        {
-            let watch = Self {
-                wayland: Some(wayland),
-                polled: None,
-            };
-            return (watch, wayland_reading(now));
-        }
         let _ = window;
         let now = DisplayReading::read(surface, adapter);
         log_os_reported(now.luminance);
         let watch = Self {
-            #[cfg(target_os = "linux")]
-            wayland: None,
             polled: Some(horizon_os::time::Instant::now() + DISPLAY_POLL),
         };
         (watch, now)
@@ -14027,10 +14004,6 @@ impl DisplayWatch {
         time: horizon_os::time::Instant,
         read: impl FnOnce() -> DisplayReading,
     ) -> Option<DisplayReading> {
-        #[cfg(target_os = "linux")]
-        if let Some(wayland) = &mut self.wayland {
-            return wayland.changed().map(wayland_reading);
-        }
         let next = self.polled.as_mut()?;
         if time < *next {
             return None;
@@ -14116,41 +14089,6 @@ fn os_reported(info: &wgpu::DisplayHdrInfo) -> Option<crate::graphics::Reported>
     })
 }
 
-/// What a compositor's luminances mean in HDR output's scale.
-///
-/// KWin maps content's reference white (203 nits in PQ, BT.2408) onto its own, so the
-/// desktop's white is 203 there and the peak is the target's maximum over that ratio.
-/// Checked on KWin. Hyprland (0.57) reports the standard 203, and shows HDR windows below
-/// the SDR white of its desktop (which it doesn't report), so Auto can't match its desktop
-/// there. Other compositors are unchecked. The peak is kept within the settings' lowest and
-/// PQ's top, so the metadata never ends below the black level.
-#[cfg(target_os = "linux")]
-fn wayland_reading(now: Option<horizon_hdr::wayland::Luminances>) -> DisplayReading {
-    now.map_or_else(DisplayReading::default, |l| DisplayReading {
-        luminance: Some(reported(l)),
-        // The preferred target's headroom is the compositor's live report, not the
-        // swapchain's supported formats. Invalid or absent readings stay unknown.
-        hdr: (l.reference.is_finite()
-            && l.reference > 0.0
-            && l.target_max.is_finite()
-            && l.target_max > 0.0)
-            .then_some(l.target_max > l.reference),
-    })
-}
-#[cfg(target_os = "linux")]
-fn reported(l: horizon_hdr::wayland::Luminances) -> crate::graphics::Reported {
-    let peak = (l.target_max * 203.0 / l.reference.max(1.0)).round() as u32;
-    log_display(format!(
-        "Horizon renderer: the compositor shows this window with reference white {} nits, \
-         {}..{} nits: peak {peak} nits in HDR output's scale",
-        l.reference, l.target_min, l.target_max,
-    ));
-    crate::graphics::Reported {
-        paper_white: 203,
-        peak: peak.clamp(200, 10_000),
-        peak_guessed: false,
-    }
-}
 
 #[cfg(test)]
 mod shadow_face_tests {

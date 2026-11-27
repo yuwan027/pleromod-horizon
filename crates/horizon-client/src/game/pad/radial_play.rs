@@ -155,7 +155,7 @@ impl Game<'_> {
     /// when it runs.
     fn pad_radial_why(&self, action: RadialAction) -> Option<&'static str> {
         match action {
-            RadialAction::Emote if !super::super::cosmetics::enabled() => Some(WHY_COSMETICS),
+            RadialAction::Emote => Some(WHY_COSMETICS),
             RadialAction::QuickActions if !self.has_quick_actions() => Some(WHY_QUICK_ACTIONS),
             RadialAction::SocialInteractions if !self.is_multiplayer_server() => Some(WHY_SOCIAL),
             _ => None,

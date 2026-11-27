@@ -207,6 +207,12 @@ export function horizon_take_picked() {
 export function horizon_picked_kind() {
     return picked ? picked[0] : undefined;
 }
+export function horizon_shown() {
+    globalThis.dispatchEvent(new Event("horizon-shown"));
+}
+export function horizon_startup_trace() {
+    return !!globalThis.horizonStartupTrace;
+}
 "#)]
 extern "C" {
     fn horizon_download(name: &str, bytes: &[u8]);
@@ -230,6 +236,8 @@ extern "C" {
     fn horizon_function_key_chords() -> bool;
     fn horizon_take_picked() -> JsValue;
     fn horizon_picked_kind() -> Option<String>;
+    fn horizon_shown();
+    fn horizon_startup_trace() -> bool;
     fn horizon_console(level: u32, message: &str);
     fn horizon_pointer_lock(want: bool);
     fn horizon_pointer_lock_lost() -> bool;
@@ -317,6 +325,12 @@ pub fn horizon_start(args: Vec<String>) {
 /// The arguments the page passed to [`horizon_start`].
 pub(crate) fn args() -> Vec<String> {
     ARGS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Whether the page asked for the start's steps on the console (`?trace` in its address):
+/// asked on the page's own thread, whose globals the workers don't see.
+pub fn startup_trace() -> bool {
+    horizon_startup_trace()
 }
 
 /// Whether F then a digit should type a function key: on ChromeOS, whose keyboards have no
@@ -441,6 +455,15 @@ pub fn take_picked_named(kind: &str) -> Option<(String, Vec<u8>)> {
 
 thread_local! {
     static STATUS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// The game's own screen is on the canvas: the page's `horizon-shown` event,
+/// once, for the page to take down what it showed until then.
+pub fn shown() {
+    static SENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !SENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        horizon_shown();
+    }
 }
 
 /// What the game last said about itself (JSON: frames, chunks, loading

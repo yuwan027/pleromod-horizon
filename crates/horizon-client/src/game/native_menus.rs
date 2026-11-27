@@ -230,6 +230,12 @@ impl Game<'_> {
     /// The player's 36 inventory slots (0..9 the hotbar), to show or offer
     /// them; None for a player not here, dead, or whose state is swapped in.
     pub(super) fn native_player_stacks(&self, uuid: u128) -> Option<Vec<Option<ItemStack>>> {
+        // Inside `native_inventory_click`: the slots as the player clicked them.
+        if let Some((player, stacks, _)) = &self.native_click_stacks
+            && *player == uuid
+        {
+            return Some(stacks.clone());
+        }
         let host = self.lan.as_ref()?;
         let g = host
             .hub

@@ -122,6 +122,46 @@ pub fn register_mod_effects(effects: impl IntoIterator<Item = (String, u32, Cate
         .collect();
     MOD_EFFECTS.set(defs).is_ok()
 }
+/// An attribute modifier a content mod's effect grants (`MobEffect.addAttributeModifier`):
+/// `amount` at amplifier 0 and `per_level` more for each level above.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModEffectModifier {
+    /// `minecraft:movement_speed`.
+    pub attribute: &'static str,
+    pub id: &'static str,
+    pub amount: f64,
+    pub per_level: f64,
+    /// `add_value`, `add_multiplied_base` or `add_multiplied_total`.
+    pub operation: &'static str,
+}
+impl ModEffectModifier {
+    /// `MobEffect.getAttributeModifierValue`.
+    pub fn value(&self, amplifier: i32) -> f64 {
+        self.amount + self.per_level * f64::from(amplifier)
+    }
+}
+/// The attribute modifiers of the content mods' effects, by effect id.
+static MOD_EFFECT_MODIFIERS: OnceLock<HashMap<String, Vec<ModEffectModifier>>> = OnceLock::new();
+/// Registers what the content mods' effects add to attributes, with their effects
+/// (`register_mod_effects`): set once per process, false when it already was.
+pub fn register_mod_effect_modifiers(
+    modifiers: impl IntoIterator<Item = (String, Vec<ModEffectModifier>)>,
+) -> bool {
+    MOD_EFFECT_MODIFIERS
+        .set(modifiers.into_iter().filter(|(_, m)| !m.is_empty()).collect())
+        .is_ok()
+}
+/// What the content mod's effect `id` adds to attributes; none for vanilla's, whose
+/// modifiers the game knows itself.
+pub fn mod_effect_modifiers(id: &str) -> &'static [ModEffectModifier] {
+    if !is_mod_effect(id) {
+        return &[];
+    }
+    MOD_EFFECT_MODIFIERS
+        .get()
+        .and_then(|all| all.get(id))
+        .map_or(&[], Vec::as_slice)
+}
 /// The content mods' effects, in registry order.
 pub fn mod_effects() -> &'static [EffectDef] {
     MOD_EFFECTS.get().map_or(&[], Vec::as_slice)

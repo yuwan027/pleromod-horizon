@@ -609,10 +609,29 @@ fn effect_modifier(effect: &str, amplifier: i32, a: Attr) -> Option<(f64, Op)> {
 /// The attribute modifiers of the mob's effects (`MobEffect.addAttributeModifier`),
 /// scaled by the amplifier plus one.
 fn effect_modifiers(m: &Mob, a: Attr) -> impl Iterator<Item = (f64, Op)> + '_ {
-    m.extra
-        .effects
+    m.extra.effects.iter().flat_map(move |&(effect, _, amplifier)| {
+        effect_modifier(effect, amplifier, a)
+            .into_iter()
+            .chain(mod_effect_modifiers(effect, amplifier, a))
+    })
+}
+/// The modifiers a content mod's effect declares for `a` (docs/mods.md).
+fn mod_effect_modifiers(
+    effect: &str,
+    amplifier: i32,
+    a: Attr,
+) -> impl Iterator<Item = (f64, Op)> + 'static {
+    crate::brewing::mod_effect_modifiers(effect)
         .iter()
-        .filter_map(move |&(effect, _, amplifier)| effect_modifier(effect, amplifier, a))
+        .filter(move |m| m.attribute.strip_prefix("minecraft:") == Some(a.name()))
+        .map(move |m| {
+            let op = match m.operation {
+                "add_multiplied_base" => Op::AddMultipliedBase,
+                "add_multiplied_total" => Op::AddMultipliedTotal,
+                _ => Op::AddValue,
+            };
+            (m.value(amplifier), op)
+        })
 }
 /// `AttributeInstance.getValue`: the base, then the modifiers by operation.
 pub fn value(m: &Mob, a: Attr) -> f64 {
@@ -2476,6 +2495,10 @@ pub fn sound_variants(s: Species) -> &'static [&'static str] {
 /// without sound variants.
 pub fn variant_sound(m: &Mob, kind: &str) -> Option<&'static str> {
     use std::{collections::HashMap, sync::Mutex};
+    // A content mod's type has its row's sounds, never its template's variants.
+    if !m.kind.id.starts_with("minecraft:") {
+        return None;
+    }
     let species = m.species();
     let name = match species {
         Species::Pig => "pig",

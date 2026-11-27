@@ -403,6 +403,13 @@ pub(super) fn spawn_loader(
     let handle = horizon_os::thread::Builder::new()
         .name("resource-loader".into())
         .spawn(move || {
+            // The page's scoped threads are the job pool's work (horizon-os's `scoped`): its
+            // workers start now, so the mods' overlay and the tables load on them too.
+            #[cfg(target_arch = "wasm32")]
+            {
+                horizon_threads::jobs::configure(settings.horizon.worker_threads());
+                horizon_threads::jobs::pool();
+            }
             let (root, pack_error) = startup_resource_root(&vanilla_root, &settings, &dev_mods);
             let result = load_resources(
                 root,
@@ -1281,7 +1288,7 @@ impl Loading {
             horizon_client::level_loading::draw_loading_overlay(
                 batch,
                 &gui.atlas,
-                self.progress.line(),
+                &self.progress.line(),
                 self.progress.fraction(),
                 self.settings.file.bool("darkMojangStudiosBackground"),
             );

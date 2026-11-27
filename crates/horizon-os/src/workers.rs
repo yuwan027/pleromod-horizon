@@ -256,3 +256,174 @@ pub fn sleep(dur: std::time::Duration) {
 pub fn available_parallelism() -> io::Result<NonZeroUsize> {
     Ok(NonZeroUsize::new(horizon_hardware_concurrency() as usize).unwrap_or(NonZeroUsize::MIN))
 }
+
+/// `std::thread::scope` on the page. A Web Worker starts only once the page is back in the
+/// browser's loop, long after a scope wants its threads, so a scope's threads are jobs instead:
+/// queued for workers that already run (the game's job pool, which says so with [`serve`]),
+/// and run by whoever takes them first, a pool worker or the thread that joins them. Nothing
+/// waits for a job that hasn't started, so a pool that is busy, small or not yet started only
+/// makes the scope run more of its own work, as it all did before workers served it.
+pub mod scoped {
+    use super::in_worker;
+    use std::{
+        collections::VecDeque,
+        marker::PhantomData,
+        sync::{Arc, Condvar, Mutex, OnceLock},
+    };
+
+    type Task = Box<dyn FnOnce() + Send + 'static>;
+
+    struct Job {
+        task: Mutex<Option<Task>>,
+        done: Mutex<bool>,
+        finished: Condvar,
+    }
+
+    impl Job {
+        /// Runs the task unless someone else took it. Whether it ran here.
+        fn run(&self) -> bool {
+            let task = self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let Some(task) = task else {
+                return false;
+            };
+            task();
+            *self.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            self.finished.notify_all();
+            true
+        }
+        /// Returns once the task has run: here, if nobody started it.
+        fn finish(&self) {
+            if self.run() {
+                return;
+            }
+            // Only a worker gets here: the page's thread queues nothing.
+            let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+            while !*done {
+                done = self.finished.wait(done).unwrap_or_else(|e| e.into_inner());
+            }
+        }
+    }
+
+    static QUEUE: Mutex<VecDeque<Arc<Job>>> = Mutex::new(VecDeque::new());
+    static NOTIFY: OnceLock<fn()> = OnceLock::new();
+
+    /// Workers now run the scopes' jobs ([`run_queued`]); `notify` wakes one when a job is queued.
+    pub fn serve(notify: fn()) {
+        let _ = NOTIFY.set(notify);
+    }
+
+    /// Whether a scope's job waits for a worker.
+    pub fn queued() -> bool {
+        !crate::sync::lock(&QUEUE)
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    }
+
+    /// Runs the oldest waiting job on this thread. False when none waited.
+    pub fn run_queued() -> bool {
+        let job = QUEUE.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
+        match job {
+            Some(job) => {
+                job.run();
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub struct Scope<'scope, 'env: 'scope> {
+        jobs: Mutex<Vec<Arc<Job>>>,
+        _scope: PhantomData<&'scope mut &'scope ()>,
+        _env: PhantomData<&'env mut &'env ()>,
+    }
+
+    pub struct ScopedJoinHandle<'scope, T> {
+        job: Option<Arc<Job>>,
+        result: Arc<Mutex<Option<T>>>,
+        _scope: PhantomData<&'scope ()>,
+    }
+
+    impl<'scope, 'env> Scope<'scope, 'env> {
+        /// Queues `f` for a worker; on the page's thread, which may not wait for one, and
+        /// before any worker serves the scopes, runs it now.
+        pub fn spawn<F, T>(&'scope self, f: F) -> ScopedJoinHandle<'scope, T>
+        where
+            F: FnOnce() -> T + Send + 'scope,
+            T: Send + 'scope,
+        {
+            let result = Arc::new(Mutex::new(None));
+            let Some(notify) = NOTIFY.get().filter(|_| in_worker()) else {
+                *result.lock().unwrap_or_else(|e| e.into_inner()) = Some(f());
+                return ScopedJoinHandle {
+                    job: None,
+                    result,
+                    _scope: PhantomData,
+                };
+            };
+            let slot = result.clone();
+            let task: Box<dyn FnOnce() + Send + 'scope> = Box::new(move || {
+                let value = f();
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
+            });
+            // SAFETY: only the lifetime changes. `scope` returns once every job of the scope
+            // has run (`Job::finish`), so the task and what it borrows from 'scope are not
+            // used after that; a panic aborts the page (panic=abort), it doesn't unwind past it.
+            let task: Task = unsafe { std::mem::transmute(task) };
+            let job = Arc::new(Job {
+                task: Mutex::new(Some(task)),
+                done: Mutex::new(false),
+                finished: Condvar::new(),
+            });
+            self.jobs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(job.clone());
+            QUEUE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push_back(job.clone());
+            notify();
+            ScopedJoinHandle {
+                job: Some(job),
+                result,
+                _scope: PhantomData,
+            }
+        }
+    }
+
+    impl<T> ScopedJoinHandle<'_, T> {
+        pub fn join(self) -> std::thread::Result<T> {
+            if let Some(job) = &self.job {
+                job.finish();
+            }
+            let value = self.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+            Ok(value.expect("a finished scoped job left its result"))
+        }
+        pub fn is_finished(&self) -> bool {
+            self.job
+                .as_ref()
+                .is_none_or(|job| *job.done.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+    }
+
+    pub fn scope<'env, F, T>(f: F) -> T
+    where
+        F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
+    {
+        let scope = Scope {
+            jobs: Mutex::new(Vec::new()),
+            _scope: PhantomData,
+            _env: PhantomData,
+        };
+        let result = f(&scope);
+        // Threads nobody joined: the scope still waits for them, as std's does.
+        loop {
+            let job = scope.jobs.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            match job {
+                Some(job) => job.finish(),
+                None => break,
+            }
+        }
+        result
+    }
+}

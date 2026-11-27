@@ -423,8 +423,12 @@ impl Game<'_> {
             for event in queued {
                 match event {
                     horizon_client::mobs::MobEvent::Sound(s, at, volume, pitch) => {
-                        self.audio
-                            .play(&format!("minecraft:{s}"), Some(at), volume, pitch);
+                        self.audio.play(
+                            &horizon_client::mobs::sound_id(s),
+                            Some(at),
+                            volume,
+                            pitch,
+                        );
                     }
                     horizon_client::mobs::MobEvent::Infested { at, velocities } => {
                         infested.push((at, velocities))

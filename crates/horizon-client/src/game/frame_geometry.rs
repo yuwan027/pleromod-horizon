@@ -447,12 +447,11 @@ impl Game<'_> {
                 eye[1].floor() as i32,
                 eye[2].floor() as i32,
             );
-            self.submit_item_world(
-                &state,
-                m,
-                block_entity_render::vertex_light(light),
-                &mut out,
-            );
+            let light = block_entity_render::vertex_light(light);
+            // A mod's own renderer for the item draws in its model's place.
+            if !self.item_drawn_by_mod(&stack, context, a, m, light, &mut out) {
+                self.submit_item_world(&state, m, light, &mut out);
+            }
         }
         // The hand has its own submit storage, which never uses improved
         // transparency (`LevelRenderer` alone calls `setUseImprovedTransparency`):

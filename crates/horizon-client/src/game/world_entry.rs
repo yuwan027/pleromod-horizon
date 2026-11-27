@@ -44,6 +44,13 @@ impl Game<'_> {
         if std::mem::take(&mut self.pending_pack_reload) {
             self.reload_packs();
         }
+        // The shared world opens once it is joined and its folder built.
+        if let Some(PendingWorldEntry::Local { folder, .. }) = &self.pending_entry {
+            let folder = folder.clone();
+            if self.play_world_waits(&folder)? {
+                return Ok(());
+            }
+        }
         match self.pending_entry.take() {
             Some(PendingWorldEntry::Local {
                 folder,

@@ -125,6 +125,13 @@ pub struct World {
     /// for `ServerLevel.sendBlockUpdated`'s path recomputing; kept only while
     /// the mobs of this world tick (`game/creatures.rs`).
     pub path_writes: Option<Vec<((i32, i32, i32), u32, u32)>>,
+    /// Every write (position, old and new state), kept while the shared world of
+    /// pleromod.com/play is played (`game/play.rs`), which sorts out the players' own and
+    /// what grew from what the game works out for itself.
+    pub play_log: Option<Vec<((i32, i32, i32), u32, u32)>>,
+    /// Where in `play_log` each random tick began, and whether the block that ticked grows
+    /// (a crop, a sapling); `None` where the random ticks of a chunk ended.
+    pub play_marks: Vec<(usize, Option<bool>)>,
     /// The chunks changed in bulk (`edit_runs`) since the log was last
     /// drained, kept while `block_log` is: sent to the players whole.
     pub bulk_log: FxHashSet<(i32, i32)>,
@@ -255,6 +262,8 @@ impl World {
             block_log: None,
             block_log_held: Vec::new(),
             path_writes: None,
+            play_log: None,
+            play_marks: Vec::new(),
             bulk_log: Default::default(),
             light_log: None,
             moving_piston_fallback: Vec::new(),
@@ -371,6 +380,9 @@ impl World {
             }
             if let Some(writes) = &mut self.path_writes {
                 writes.push(((x, y, z), previous, state.0));
+            }
+            if let Some(log) = &mut self.play_log {
+                log.push(((x, y, z), previous, state.0));
             }
             self.modified.insert((x >> 4, z >> 4));
             // The mesher reads a 3x3x3 neighbourhood for AO, so a write marks

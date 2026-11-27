@@ -346,6 +346,14 @@ uses `flags::UPDATE_CLIENTS`) and set `handled` to skip the block's own tick. Wi
 its own tick as it is now, if it is still the tick's block. Bundles that use
 it need `"hooks": 34`.
 
+A trait mod's level hooks read and write more of the level (API next): `LevelHost` also answers a state's block
+(`state_block`), one of its properties as text (`state_property`), a block's default state (`default_state`),
+`Level.getMaxLocalRawBrightness` (`raw_brightness`: what a sapling or a crop grows by) and `BlockState.canBeReplaced`
+(`replaceable`); `LevelWriteHost::set_block(pos, state, flags)` is `Level.setBlock` for a block without a block entity,
+so a plant can put a block beside itself and a sapling its tree inside the random tick or the bone meal that grows
+it. Each has a default body (none, full light, not replaceable, nothing written), so a test's level implements only
+what its hook asks.
+
 API 35 adds the commands a mod owns on the client: `native_commands` is asked for their names, so the chat box
 colours, completes and lists them like the game's own, and `native_command` runs them. A name the game already has
 keeps that command. Bundles that use it need `"hooks": 35`.
@@ -884,7 +892,10 @@ two take `&self`: during a mob's tick the mob world borrows the game, so `&mut s
 game doesn't hold the mobs being ticked, nor the player's effects. `native_on_effect_added` hears it given to an
 entity that didn't have it, and `native_mob_effect_added` (NeoForge's `MobEffectEvent.Added`) every time it is given.
 A mob is its `Entity.getId`; a player is None, with their state swapped in (`native_acting_player`). Vanilla's effects
-never reach them. Bundles that use them need `"hooks": 56`.
+never reach them. What an effect adds to attributes needs no hook: its declaration lists it (`attribute_modifiers`,
+[mods.md](mods.md)). A hit reaches a mod with no game to ask (`native_living_incoming_damage_v3`), so a mod whose
+effects change hits notes who has which as each ticks here, and leaves what it then does to the world for
+`native_level_tick_post`. Bundles that use them need `"hooks": 56`.
 
 API 57 adds chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
 `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Bundles that use them need `"hooks": 57`.
@@ -3356,7 +3367,11 @@ tick later with a command.
   numbering, -999 outside), `button` and `mode` (`ClickType`'s id: 0 pickup, 1 quick move, 2 swap, 3 clone, 4 throw,
   6 pickup all). Drags (mode 5) are heard once, at their end, by `native_inventory_drag`; a mod's own menus are `native_menu_clicked`'s; spectators are not
   heard. Set `cancel` and nothing moves: the click is handled as one that does nothing, so the client's predicted
-  slots and cursor are answered with the server's. No state is swapped in; the helpers that take a UUID reach them.
+  slots and cursor are answered with the server's. No state is swapped in, and the server's players are out of reach
+  while the click is handled: `native_menu_cursor`, `native_player_stacks` and `native_player_equipment` (the off
+  hand) answer for the clicking player as they stood when they clicked, and a click that changes their slots in its
+  own way (an item that takes others in, as a bundle does) is canceled here and done from a later hook with the
+  inventory helpers (`native_set_inventory_slot`, its `Cursor` for the cursor), in `native_level_tick_post` say.
 - **`native_inventory_drag(player, name, window, kind, slots, cancel)`**: a guest's drag (quick craft) in their own
   inventory or a vanilla menu ends, heard before it is applied (Bukkit's `InventoryDragEvent`): `kind` 0 spreads the
   cursor evenly (left button), 1 puts one in each slot (right), 2 clones (middle, creative), and `slots` are the window
@@ -4263,8 +4278,12 @@ impl Hooks for Guards {
 From a goal, `mob.nav_move_to(cx.w, [x, y, z], speed)` walks the mob with the engine's pathfinding (`create_path_to` and
 `nav_move_to_path` to check a path first), and `mob.ai.mov.set_wanted(x, y, z, speed)` steps it toward a point, for a mod with
 pathfinding of its own. `goals::Float` keeps the navigation floating, as FloatGoal's constructor does. Each mob gets its own
-goals, so a goal's fields are that mob's state while it lives; state that is saved goes in an attachment on
-`Holder::Entity(mob.id)` ([Server attachments](#server-attachments)), from a hook with a host such as `native_entity_tick_pre`.
+goals, so a goal's fields are that mob's state while it lives. A goal saves what it must keep with `Goal::save(tag)`, which
+writes its own keys into the mob's saved compound (a class's `addAdditionalSaveData`: a timer under the key the Java mod
+uses, so a world from either loads in the other), and takes it back in `Goal::load(tag)`, which is given the whole saved
+compound when the mob is loaded, after `register_goals` (`readAdditionalSaveData`); both do nothing by default. State
+that is no goal's goes in an attachment on `Holder::Entity(mob.id)` ([Server attachments](#server-attachments)), from a
+hook with a host such as `native_entity_tick_pre`.
 The hook is asked on a client too, for its copies of a server's mobs; goals tick only where the mob's AI runs.
 
 ### Loot tables
@@ -4490,7 +4509,8 @@ items are left out (NeoForge's `RenderLivingEvent.Pre`, cancelled); its name tag
 - `mob` (`NativeMobRender`) is the frame's `LivingEntityRenderState`: the id, kind, custom name and `baby`, the partial tick,
   `age` (ticks lived plus the partial tick), `body_yaw`, `head_yaw` (from the body) and `pitch` in degrees, the walk cycle
   (`walk_position`, `walk_speed`: a vanilla quadruped's legs swing `cos(walk_position * 0.6662) * 1.4 * walk_speed` radians), `hurt_time`,
-  `death_time` and `on_ground`.
+  `death_time`, `on_ground` and `velocity` (`getDeltaMovement`, blocks a tick: what a mod's own animations tell a walking
+  mob from a standing one by).
 - `draw` is a block entity's frame (`native_block_entity_submit`): draw with `native_draw_cube`, `native_draw_quad`,
   `native_draw_block` and `native_draw_item` under its pose stack, which starts at the mob's feet turned with its body: +z
   is the way it faces, +x its left, +y up, in blocks. Turn a head or swing a leg with `rotate_about` and a pivot. It holds
@@ -4531,6 +4551,39 @@ items are left out (NeoForge's `RenderLivingEvent.Pre`, cancelled); its name tag
   draw.translate([0.0, -1.501, 0.0]);
   host.draw_model_part(draw, &model, "mymod:entity/golem", 0xFFFFFF);
   ```
+
+### A living entity's render scale
+
+`native_living_render_scale(entity, kind, player, scale)` (client) is the scale a living entity's vanilla model is drawn
+at this frame, along x, y and z from its feet: a mixin's `poseStack.scale(x, y, z)` in `LivingEntityRenderer.render`
+right after its `pushPose` (NeoForge's `RenderLivingEvent.Pre`, scaling the pose). It is applied before the model's own
+scale (`minecraft:scale`, a baby's) and before the body turns, so y is up and x and z are the level's. `scale` arrives
+`[1.0, 1.0, 1.0]`; multiply into it, so two mods' scales add up. The model scales with its armour, held items, cape
+and other layers, `native_mob_layer`'s included; the name tag, shadow, flames and the entity's box do not (change the
+box with attributes).
+
+- It is asked once a frame for every mob in view that vanilla draws, and for every player: the others in view and this
+  window's own in third person. `entity` is the network id and `kind` the entity type; for a player `kind` is
+  `minecraft:player` and `player` their UUID where the game knows it.
+- A mob a mod draws itself (`native_mob_submit`, `native_player_submit` answering `drawn`) is not asked: scale your own
+  model in its frame.
+- A client knows no other entity's effects or attributes: vanilla syncs neither. Tell your client half which entities
+  to scale, as a Forge mixin does with a synched flag: keep the ids on the server (`native_mob_effect_added`, a look at
+  `native_entity_effects` in `native_level_tick_post`) and send them with [mod messages](#mod-messages) when they
+  change. In single player and on a host the server's hooks and the window's are one process, so a set both read needs
+  no message there.
+
+The hook is a pending fragment (`tools/native-hook-fragments/living_render_scale.json`), so it has no API number yet.
+
+```rust,ignore
+fn living_render_scale(&self, _host: &dyn Host, event: &mut LivingRenderScaleEvent<'_>) {
+    if squashed(event.entity, event.player) {
+        for (axis, by) in event.scale.iter_mut().zip([1.3, 0.5, 1.3]) {
+            *axis *= by;
+        }
+    }
+}
+```
 
 ### Advancement triggers
 
@@ -4780,6 +4833,41 @@ game.native_play_local_sound("ironfall:ear.ringing", eye, 1.0, 1.0, 0);
 ```
 
 Bundles need `"hooks": 573`.
+
+`native_play_sound_loop(sound, at, source, volume, pitch)` (client, `host.play_sound_loop`) starts a sound that repeats
+at `at` until the mod stops it, as a NeoForge mod's own `AbstractTickableSoundInstance` with `looping` set does for a
+machine that hums while it runs: sound event `sound` in category `source` (`SoundSource`'s ordinal, 4 for blocks), with
+vanilla's linear attenuation. It answers a handle, or None on a server and for a value out of range.
+`native_stop_sound_loop(handle)` ends it. The sound engine may end a loop by itself (the resources reload, the level
+changes): `native_sound_loop_active(handle)` is `SoundManager.isActive`, so a mod that asks it now and then can start
+the loop again, as a mod's own check does.
+
+A client has no block entity tickers for a mod's blocks. `native_nearby_mod_block_entities(radius)` (client,
+`host.nearby_mod_block_entities`) lists where the mod block entities are that this client has within `radius` blocks
+of its player, so a client tick (`native_client_tick_post`) can do for each what the mod's `clientTick` does; read each
+with `Host::mod_block_entity`, whose client copy has the update tag. Empty on a server.
+
+```rust,ignore
+// Each client tick: a kiln that burns hums, one that stands is quiet.
+for pos in host.nearby_mod_block_entities(48.0) {
+    let burning = host.mod_block_entity(pos).is_some_and(|kiln| lit(&kiln.nbt));
+    match (burning, self.humming.get(&pos).copied()) {
+        (true, None) => {
+            let at = pos.map(|v| f64::from(v) + 0.5);
+            if let Some(handle) = host.play_sound_loop("mymod:kiln.hum", at, 4, 1.0, 1.0) {
+                self.humming.insert(pos, handle);
+            }
+        }
+        (false, Some(handle)) => {
+            host.stop_sound_loop(handle);
+            self.humming.remove(&pos);
+        }
+        _ => {}
+    }
+}
+```
+
+These four are pending fragments (`tools/native-hook-fragments/sound_loops.json`) with no API number yet.
 
 ### Fireworks a client mod draws
 
@@ -5213,6 +5301,24 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   through. Asked once a frame before the world is drawn (not on the title screen's panorama); the last mod to set
   one draws.
 
+### Held items a mod draws
+
+`native_item_submit(stack, display, draw, drawn)` (client) is asked before an item held in a hand is drawn in the
+world: in the first person's hands (`FirstPersonRightHand`, `FirstPersonLeftHand`) and in the hands of any player or
+mob that holds one (`ThirdPersonRightHand`, `ThirdPersonLeftHand`, `Ground` for the mobs that carry an item as it lies,
+`Head` for a spyglass at the eye). It is where a NeoForge item's `IClientItemExtensions.getCustomRenderer` draws
+(`BlockEntityWithoutLevelRenderer.renderByItem`, GeckoLib's `GeoItemRenderer`): draw the stack under `draw`'s pose with
+the helpers a block entity draws with (`native_draw_quad`, `native_draw_cube`, `native_draw_model`) and set `drawn`,
+and the item's own model is left out for that hand. `native_render_hand` can only hide a hand; this one replaces what
+the hand holds.
+
+`draw`'s pose is where `ItemRenderer.render` starts for the stack, before the model's display transform, so a mod
+applies the transform its model has for `display` (mirrored for a left hand, as `ItemTransform.apply` does), moves by
+`[-0.5, -0.5, -0.5]` as `ItemRenderer` does, and draws in the item's unit cube. `draw.light` is the holder's light,
+`draw.partial` the frame's partial tick. Asked each frame for each held stack of a mod's item, never for a
+`minecraft:` item: check the item first and answer fast. The GUI, dropped items and item frames draw the item's model
+as before. The hook is a pending fragment (`tools/native-hook-fragments/item_submit.json`) with no API number yet.
+
 ### World warps
 
 A world warp bends the drawn world itself: every terrain vertex (far terrain's tiles too) and entity vertex goes
@@ -5444,6 +5550,98 @@ only for a server's players (single player's server thread, LAN guests, a dedica
 never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
 slot from filling that way, lower `max_stack`.
+
+### The enchanting table for other items
+
+Two hooks open `EnchantmentMenu` to an item vanilla has no offer for, as a Forge mod's mixins at the head of
+`slotsChanged` and `clickMenuButton` do: an offer of the mod's own in the table, and what pressing it does (a
+conversion, a recharge) in place of enchanting. `native_prepare_item_enchant` and `native_enchant_item` stay for
+vanilla's own enchanting, which these leave alone unless a mod answers.
+
+- `native_enchant_offers(pos, item, offers)` is asked where `slotsChanged` begins, for any item in the table's first
+  slot. Set `offers.replaced` and the offers are yours (`NativeEnchantOffers`): `costs`, the level each of the three
+  buttons asks for (0 for no offer), and `clues`, the enchantment and level each hints at, or none. Vanilla's are then
+  not worked out, and `native_prepare_item_enchant` is not asked. Two fields are what `EnchantmentScreen` shows of
+  them: `ignores_level` takes the player's level for at least each cost, so no offer is greyed out for levels (a
+  mixin's `Math.max(player.experienceLevel, menu.costs[i])`), and `tooltip` puts your lines over a hovered offer in
+  place of the clue's, each a translation key with a `ChatFormatting` colour by name (`gray`) or none. Lapis still
+  greys an offer out as vanilla's does, one piece for the first button to three for the third.
+- `native_enchant_click(player, name, pos, button, creative, slots, taken)` (server) is asked where `clickMenuButton`
+  begins, before any of vanilla's checks, for any item. `slots` are the item and the lapis slot. Set `taken` to answer
+  for the menu: `Some(false)` refuses the click, `Some(true)` takes it and the stacks you left in `slots` become the
+  menu's (an emptied one clears its slot), after which its offers are made again. Vanilla then enchants nothing, and
+  charges no level or lapis, plays no sound and counts no statistic: do what your click does with the helpers
+  (`Host::play_sound`), which answer for the player who pressed. Leave `taken` alone and vanilla goes on.
+
+The offers are asked on the server whenever the slot changes and again on a client for its own screen, since a
+server's data slots carry only the costs and clues: answer the same on both, from the item alone. A client of a server
+sends the press of an offer a mod made without the screen's own checks, and the server's `native_enchant_click`
+decides. Both are pending fragments (`tools/native-hook-fragments/enchant_table.json`), so they have no API number yet.
+
+```rust,ignore
+fn enchant_offers(&self, _host: &dyn Host, event: &mut EnchantOffersEvent<'_>) {
+    if &*event.item.item == "mymod:dull_gem" {
+        event.offers.replaced = true;
+        event.offers.costs = [1, 0, 0];
+        event.offers.ignores_level = true;
+        event.offers.tooltip = vec![("gui.mymod.polish".into(), None), ("gui.mymod.polish_cost".into(), Some("gray".into()))];
+    }
+}
+
+fn enchant_click(&self, host: &mut dyn Host, event: &mut EnchantClickEvent<'_>) {
+    let [Some(item), lapis] = &mut *event.slots else { return };
+    if event.button != 0 || &*item.item != "mymod:dull_gem" {
+        return;
+    }
+    let paid = lapis.as_mut().filter(|l| &*l.item == "minecraft:lapis_lazuli" && l.count > 0);
+    if !event.creative && paid.is_none() {
+        *event.taken = Some(false);
+        return;
+    }
+    if let (false, Some(lapis)) = (event.creative, paid) {
+        lapis.count -= 1;
+    }
+    *item = ItemStack::new("mymod:bright_gem", 1);
+    host.play_sound("minecraft:block.enchantment_table.use", event.pos.map(|v| f64::from(v) + 0.5), 4, 1.0, 1.0);
+    *event.taken = Some(true);
+}
+```
+
+### Menu slot states
+
+`native_menu_slot_state(block, pos, data, slot, filled, may_pickup, may_place, shown)` says how container slot `slot`
+(from 0) of the menu of the mod block `block` at `pos` is right now, as a NeoForge mod's own `Slot` overrides
+`mayPickup`, `mayPlace` and `isActive` by what its machine is doing: an oven that bakes gives nothing up, a result slot
+with nothing in it is not there, a fryer's baskets go away while it fries. The three answers arrive true; clear what
+your block refuses, only for your own blocks.
+
+- `may_pickup` false: a click, a shift-click, a hotbar key, a drop key and a double click take nothing from the slot.
+- `may_place` false: nothing goes in, by a click, a drag or a shift-click from the inventory (which tops up no stack
+  there either). It is the part of `Slot.mayPlace` that depends on the block; which items the slot takes is still
+  `native_menu_slot_rules`', asked with the stack.
+- `shown` false: the slot is not drawn and takes no click at all, as one the screen leaves out (`NativeScreen::slots`),
+  but only for now: a click the mod's own screen handles (`native_screen_click`) reaches a button under it.
+
+`data` is the menu's data slots (the block entity's `data` on the server, what has arrived of it on a client) and
+`filled` whether the slot holds something. Read anything else from the block entity with `Host::mod_block_entity(pos)`;
+a client's copy has what `native_block_entity_update_tag` sent. It is asked on the server for every container slot
+before each click in the menu, and on a client once a tick while the mod's screen is open, where it hides the slots and
+keeps the predicted clicks in step with the server's: answer the same on both, from `data`, `filled` and the block
+entity alone. Only content mod menu types ask it ([mods.md](mods.md#menu-types)). The hook is a pending fragment
+(`tools/native-hook-fragments/menu_slot_state.json`), so it has no API number yet.
+
+```rust,ignore
+fn menu_slot_state(&self, host: &dyn Host, event: &mut MenuSlotStateEvent<'_>) {
+    if event.block != "mymod:kiln" {
+        return;
+    }
+    let burning = event.data.first().is_some_and(|ticks| *ticks > 0);
+    event.may_pickup &= !burning;
+    event.may_place &= !burning;
+    // The result's slot is there once something lies in it.
+    event.shown &= event.slot != RESULT || event.filled;
+}
+```
 
 ### Recipe sources
 

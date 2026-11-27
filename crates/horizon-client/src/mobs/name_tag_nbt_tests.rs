@@ -59,6 +59,7 @@ fn kind() -> Arc<MobType> {
         step_sound: None,
         food: Default::default(),
         tempt: Default::default(),
+        spawn_placement: None,
     })
 }
 

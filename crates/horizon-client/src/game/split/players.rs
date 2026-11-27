@@ -503,7 +503,6 @@ impl Split<'_> {
                 None,
                 audio,
                 vanilla_root,
-                Instant::now(),
                 None,
                 Some(settings),
                 None,

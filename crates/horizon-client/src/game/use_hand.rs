@@ -156,6 +156,18 @@ impl Game<'_> {
                     )
                 });
                 self.process_level_events()?;
+                // A mod block whose block entity has a menu opens it, as a Java mod's
+                // `useWithoutItem` does (`NetworkHooks.openScreen`), whatever its template.
+                let key = (hit.pos[0], hit.pos[1], hit.pos[2]);
+                if result == horizon_world::level::InteractionResult::Pass
+                    && branch == horizon_world::level::UseBranch::WithoutItem
+                    && self.mod_menu_at(key).is_some()
+                {
+                    self.open_menu(hit.pos);
+                    self.trigger_default_block_use(hit.pos);
+                    self.swing_arm();
+                    return Ok(true);
+                }
                 // CakeBlock.useItemOn: the candle is used up and counted.
                 if adds_candle
                     && result == horizon_world::level::InteractionResult::Success

@@ -51,9 +51,6 @@ pub(super) struct Pads {
     pub(super) feed: Option<PadState>,
     /// The pad behind `feed`.
     feed_source: Option<PadId>,
-    /// The real controllers and the DualSense's output.
-    #[cfg(feature = "controllers")]
-    devices: hardware::Devices,
     /// The virtual pad of `horizon-ctl pad`.
     injected: PadState,
     /// The virtual pad was in use at the last poll.
@@ -142,8 +139,6 @@ struct Context {
 
 mod capture;
 mod guide;
-#[cfg(feature = "controllers")]
-mod hardware;
 #[cfg(test)]
 mod parity_tests;
 mod radial_play;
@@ -184,7 +179,7 @@ enum Connection {
 }
 
 /// What a controller did since the last frame.
-#[cfg_attr(not(feature = "controllers"), allow(dead_code))]
+#[allow(dead_code)]
 pub(in crate::game) enum PadEvent {
     Press(PadId, Button),
     /// Disconnected (out of battery, unplugged, out of range).
@@ -195,9 +190,7 @@ pub(in crate::game) enum PadEvent {
     Back(PadId),
 }
 
-/// A build without the `controllers` feature (the server build, which must not need libudev): no
-/// hardware pads, only `horizon-ctl pad`'s virtual one.
-#[cfg(not(feature = "controllers"))]
+/// No hardware pads: only `horizon-ctl pad`'s virtual one.
 mod hardware {
     use super::{super::Game, Pads};
     use horizon_client::gamepad::{PadState, Pulse, Rumble};

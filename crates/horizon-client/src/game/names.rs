@@ -1283,6 +1283,7 @@ mod tests {
             step_sound: None,
             food: Default::default(),
             tempt: Default::default(),
+            spawn_placement: None,
         };
         Mob::new(0, Arc::new(kind), Vec3::ZERO, 0.0)
     }

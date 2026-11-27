@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "living_render_scale",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_render_scale",
+      "neoforge": "RenderLivingEvent.Pre (poseStack.scale)",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "the scale a living entity's vanilla model is drawn at (`native_living_render_scale`).",
+  "doc_summary": "the scale a living entity's vanilla model is drawn at, along x, y and z from its feet (`native_living_render_scale`), as `poseStack.scale` in `LivingEntityRenderer.render`. Bundles need \"hooks\": @API:living_render_scale@."
+}

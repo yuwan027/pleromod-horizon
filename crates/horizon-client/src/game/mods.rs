@@ -105,6 +105,29 @@ pub(super) fn content_root(
     content_root_at(root, enabled, disabled, dev, &here, version.as_deref())
 }
 
+/// The content root the page's game builds at its start, built here ahead of it
+/// (`HORIZON_WEB_CONTENT`, web/build.sh): from the mods in `beside`'s `native-content/`, as the
+/// page has them beside its game, into this folder's `.horizon-cache`, stamped as the page
+/// stamps its own. web/content_root.py packs it for the page.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn web_content_root(
+    root: &std::path::Path,
+    beside: &std::path::Path,
+) -> horizon_client::Result<std::path::PathBuf> {
+    horizon_client::mod_content::stamp_as_the_page();
+    let here = horizon_os::env::current_dir()?;
+    let none = std::collections::BTreeSet::new();
+    let out = content_root_at(root, &none, &none, &[], &here, Some(beside));
+    if out == root {
+        return Err(format!(
+            "no content root: no content mod in {}/native-content, or its content was refused",
+            beside.display()
+        )
+        .into());
+    }
+    Ok(out)
+}
+
 fn content_root_at(
     root: &std::path::Path,
     enabled: &std::collections::BTreeSet<String>,
@@ -322,6 +345,23 @@ fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_mods::content::EffectCategory;
     let effects = horizon_client::mod_content::mob_effects(mods);
     let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
+    // What they add to attributes (`MobEffect.addAttributeModifier`), kept for the process as
+    // the effects are.
+    brewing::register_mod_effect_modifiers(effects.iter().map(|e| {
+        let leak = |text: &str| -> &'static str { Box::leak(text.to_owned().into_boxed_str()) };
+        let modifiers = e
+            .attribute_modifiers
+            .iter()
+            .map(|m| brewing::ModEffectModifier {
+                attribute: leak(&m.attribute),
+                id: leak(&m.id),
+                amount: m.amount,
+                per_level: m.per_level.unwrap_or(m.amount),
+                operation: m.operation.name(),
+            })
+            .collect();
+        (e.id.clone(), modifiers)
+    }));
     let set = brewing::register_mod_effects(effects.into_iter().map(|e| {
         let category = match e.category {
             EffectCategory::Beneficial => Category::Beneficial,
@@ -346,7 +386,16 @@ fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
 fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_client::projectiles;
     let mut types = horizon_client::mod_content::entity_types(mods);
-    types.retain(|t| t.item.is_some());
+    // A boat type's item places it (`game/boats.rs`); the others with an item are thrown.
+    super::boats::register_mod_boats(types.iter().filter(|t| t.is_boat()).filter_map(|t| {
+        Some((
+            t.id.clone(),
+            t.template.clone(),
+            t.item.clone()?,
+            t.texture.clone(),
+        ))
+    }));
+    types.retain(|t| t.item.is_some() && !t.is_boat());
     let set = projectiles::register_thrown_types(
         types
             .iter()

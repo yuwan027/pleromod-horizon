@@ -138,6 +138,7 @@ impl ResourceSource for Bundled {
             .strip_suffix(".json")?;
         let (file, swiss) = bundled_code(code);
         let path = format!("assets/horizon/lang/{file}.json");
+        // The browser build carries only zh_cn, en_us and ja_jp.
         let body = match path.as_str() {
             "assets/horizon/lang/en_us.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/en_us.json")
@@ -145,258 +146,342 @@ impl ResourceSource for Bundled {
             "assets/horizon/lang/zh_cn.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/zh_cn.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ru_ru.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ru_ru.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/pl_pl.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/pl_pl.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/uk_ua.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/uk_ua.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/hi_in.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/hi_in.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/id_id.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/id_id.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/tr_tr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/tr_tr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ko_kr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ko_kr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/hr_hr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/hr_hr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/pt_pt.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/pt_pt.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ur_pk.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ur_pk.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fa_ir.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fa_ir.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/he_il.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/he_il.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/hu_hu.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/hu_hu.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ro_ro.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ro_ro.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/da_dk.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/da_dk.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fi_fi.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fi_fi.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/no_no.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/no_no.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/bg_bg.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/bg_bg.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sk_sk.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sk_sk.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/lt_lt.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/lt_lt.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/it_it.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/it_it.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/nl_nl.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/nl_nl.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/vi_vn.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/vi_vn.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/th_th.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/th_th.json")
             }
             "assets/horizon/lang/ja_jp.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ja_jp.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ar_sa.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ar_sa.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/pt_br.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/pt_br.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/cs_cz.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/cs_cz.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sv_se.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sv_se.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/el_gr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/el_gr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ca_es.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ca_es.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/et_ee.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/et_ee.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/lv_lv.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/lv_lv.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sl_si.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sl_si.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sr_cs.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sr_cs.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/is_is.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/is_is.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/af_za.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/af_za.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ms_my.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ms_my.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/be_by.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/be_by.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sr_sp.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sr_sp.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/az_az.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/az_az.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/uz_uz.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/uz_uz.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/kk_kz.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/kk_kz.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ka_ge.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ka_ge.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/hy_am.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/hy_am.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/bs_ba.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/bs_ba.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/mk_mk.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/mk_mk.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sq_al.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sq_al.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/cy_gb.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/cy_gb.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ga_ie.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ga_ie.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/eu_es.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/eu_es.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/gl_es.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/gl_es.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fil_ph.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fil_ph.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ta_in.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ta_in.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/mn_mn.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/mn_mn.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/lo_la.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/lo_la.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/so_so.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/so_so.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fy_nl.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fy_nl.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/gd_gb.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/gd_gb.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/lb_lu.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/lb_lu.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ky_kg.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ky_kg.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/kn_in.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/kn_in.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/mt_mt.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/mt_mt.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/eo_uy.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/eo_uy.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/haw_us.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/haw_us.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ig_ng.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ig_ng.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/la_la.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/la_la.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/tt_ru.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/tt_ru.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/yi_de.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/yi_de.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/yo_ng.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/yo_ng.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/ba_ru.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ba_ru.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/br_fr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/br_fr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/cv_cu.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/cv_cu.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fo_fo.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fo_fo.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fur_it.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fur_it.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/li_li.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/li_li.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/lmo.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/lmo.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/oc_fr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/oc_fr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/sah_sah.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/sah_sah.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/se_no.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/se_no.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/szl.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/szl.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/vec_it.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/vec_it.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/de_de.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/de_de.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/fr_fr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/fr_fr.json")
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "assets/horizon/lang/es_es.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/es_es.json")
             }

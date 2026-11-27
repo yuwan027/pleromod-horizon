@@ -25,7 +25,7 @@ fn ray_device() -> Option<(wgpu::Instance, wgpu::Device, wgpu::Queue)> {
     let desc = wgpu::DeviceDescriptor {
         required_features: features,
         required_limits: adapter.limits(),
-        experimental_features: horizon_hdr::experimental_features(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
         ..Default::default()
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&desc)).ok()?;

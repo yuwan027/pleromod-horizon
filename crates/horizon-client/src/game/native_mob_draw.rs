@@ -50,6 +50,9 @@ pub struct NativeMobRender<'a> {
     /// Ticks since it died, 0 while alive (vanilla tips the body over 20).
     pub death_time: i32,
     pub on_ground: bool,
+    /// `getDeltaMovement`: how far it moves a tick, in blocks (a mod's own
+    /// animations tell a walking mob from a standing one by it).
+    pub velocity: [f64; 3],
 }
 
 impl<'a> NativeMobRender<'a> {
@@ -75,6 +78,7 @@ impl<'a> NativeMobRender<'a> {
             hurt_time: m.hurt_time,
             death_time: m.death_time,
             on_ground: m.on_ground,
+            velocity: [m.velocity.x, m.velocity.y, m.velocity.z],
         }
     }
 }
@@ -339,6 +343,30 @@ impl Game<'_> {
             }))
         });
         Some(LookGuard { blend })
+    }
+    /// `native_living_render_scale` for `mob` (`player`: whether it is one, and this window's
+    /// own): what the mods scale its vanilla model by, held while it is drawn. None at 1.
+    pub(super) fn begin_render_scale(
+        &self,
+        mob: &Mob,
+        player: Option<bool>,
+    ) -> Option<horizon_client::mobs::render::RenderScaleGuard> {
+        let uuid = player.and_then(|local| {
+            if local {
+                Some(self.own_uuid()).filter(|u| *u != 0)
+            } else {
+                self.remote_player_uuid(mob.id)
+            }
+        });
+        let kind = if player.is_some() {
+            "minecraft:player"
+        } else {
+            &*mob.kind.id
+        };
+        let mut scale = [1.0f32; 3];
+        self.native_living_render_scale(mob.id, kind, uuid, &mut scale);
+        (scale != [1.0; 3] && scale.iter().all(|v| v.is_finite()))
+            .then(|| horizon_client::mobs::render::scaled_by(scale))
     }
     /// Gives `hook` the frame of `mob` and a draw posed at its feet; what it
     /// added to `out` stays when it answers true.

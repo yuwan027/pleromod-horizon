@@ -59,6 +59,7 @@ fn mob(species: Species, id: &str, seed: u32) -> Mob {
         step_sound: None,
         food: Default::default(),
         tempt: Default::default(),
+        spawn_placement: None,
     });
     let mut m = Mob::new(seed, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
     m.random = EntityRandom::own(LegacyRandom::new(i64::from(seed) * 31 + 7));

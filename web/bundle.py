@@ -9,7 +9,12 @@ read together, hundreds of files when a world starts: each is also packed whole
 (worldgen.tar.gz...), which the manifest names for its files, so the first read
 fetches all of them in one request.
 
-Usage: bundle.py RESOURCES OUT
+With REPLACED (content-replaced.txt, from content_root.py), the files it lists
+are fetched when read too, each by itself: the game reads the copies in the
+content root built ahead instead, and these only should it ever build that root
+itself.
+
+Usage: bundle.py RESOURCES OUT [REPLACED]
 """
 
 import gzip
@@ -23,9 +28,33 @@ from pathlib import Path
 LAZY_DIRS = ("worldgen", "biome-parameters")
 LAZY_FILES = ("horizon-sprites.cache",)
 # deprecated.json (the renamed keys) is read with every language at startup.
-KEPT_LANGUAGES = ("en_us.json", "deprecated.json")
+# The web build starts in zh_cn, and ja_jp is its neighbour on pleromod.com: both
+# are read before the first frame, so they come with boot rather than lazily.
+KEPT_LANGUAGES = ("en_us.json", "deprecated.json", "zh_cn.json", "ja_jp.json")
 # Lazy folders fetched whole, as <folder>.tar.gz, when one of their files is first read.
 PACKED_DIRS = ("worldgen", "biome-parameters")
+# The browser plays the shared world of pleromod.com/play, which generates no terrain: the
+# worldgen pack is what growth reads (trees' and mushrooms' features), not the structures'
+# templates, which stay fetched one by one should anything read them.
+UNPACKED = ("worldgen/structure/",)
+
+
+def packed(rel: str) -> bool:
+    return rel.split("/")[0] in PACKED_DIRS and not rel.startswith(UNPACKED)
+# The browser build has only the Overworld: the structure templates of the Nether's and
+# the End's structures (bastions, nether fossils, End cities) are left out altogether.
+DROPPED_STRUCTURES = ("bastion", "end_city", "nether_fossils")
+
+
+def dropped(rel: str) -> bool:
+    parts = rel.split("/")
+    # The browser build offers only zh_cn, en_us and ja_jp: other languages aren't served.
+    if parts[:3] == ["assets", "minecraft", "lang"] and len(parts) == 4:
+        return parts[3] not in KEPT_LANGUAGES
+    return len(parts) > 3 and parts[3] in DROPPED_STRUCTURES and (
+        parts[:3] == ["data", "minecraft", "structure"]
+        or parts[:3] == ["worldgen", "structure", "minecraft"]
+    )
 
 
 def lazy(rel: str) -> bool:
@@ -44,12 +73,15 @@ def main() -> None:
     if not (resources / "horizon-resources.json").is_file():
         sys.exit(f"{resources} holds no prepared resources: run horizon-prepare first")
     out.mkdir(parents=True, exist_ok=True)
+    replaced = set(Path(sys.argv[3]).read_text().split()) if len(sys.argv) > 3 else set()
     boot, rest = [], []
     for dirpath, _, names in os.walk(resources):
         for name in names:
             path = Path(dirpath) / name
             rel = path.relative_to(resources).as_posix()
-            (rest if lazy(rel) else boot).append((rel, path))
+            if dropped(rel):
+                continue
+            (rest if lazy(rel) or rel in replaced else boot).append((rel, path))
     boot.sort()
     rest.sort()
     with tarfile.open(out / "boot.tar.gz", "w:gz", format=tarfile.GNU_FORMAT, compresslevel=6) as tar:
@@ -57,7 +89,11 @@ def main() -> None:
             tar.add(path, arcname=rel, recursive=False)
     packs = {}
     for folder in PACKED_DIRS:
-        files = [(rel, path) for rel, path in rest if rel.split("/")[0] == folder]
+        files = [
+            (rel, path)
+            for rel, path in rest
+            if rel.split("/")[0] == folder and packed(rel) and rel not in replaced
+        ]
         if not files:
             continue
         name = f"{folder}.tar.gz"
@@ -75,7 +111,7 @@ def main() -> None:
         packs[folder] = f"../{name}?v={digest}"
     with open(out / "manifest.txt", "w") as manifest:
         for rel, path in rest:
-            pack = packs.get(rel.split("/")[0])
+            pack = packs.get(rel.split("/")[0]) if packed(rel) and rel not in replaced else None
             manifest.write(f"{rel}\t{path.stat().st_size}" + (f"\t{pack}" if pack else "") + "\n")
     res = out / "res"
     if res.is_symlink() or res.exists():

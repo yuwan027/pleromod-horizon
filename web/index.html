@@ -1,22 +1,60 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Horizon</title>
+<title>在线游玩 · PleroMod</title>
 <style>
+  /* pleromod.com's colours (apps/web globals.css): by day strawberry milk and custard, by night the sky */
+  :root {
+    --foreground: #4a2c34;
+    --accent: #ffe1e5;
+    --frame: #4a2c34;
+    --track-fill: #f5829b;
+    --gingham: #fff0c4;
+    --gingham-check: rgb(255 255 255 / 0.45);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --foreground: #eef0fa;
+      --accent: #41476c;
+      --frame: #666d95;
+      --track-fill: #7480d0;
+      --gingham: #262a3b;
+      --gingham-check: rgb(155 167 238 / 0.09);
+      color-scheme: dark;
+    }
+  }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   body > canvas { display: block; width: 100vw !important; height: 100vh !important; outline: none; }
+  /* The site's loading screen: its gingham, with what the page is doing in the middle */
   #status {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: #ddd; font: 16px/1.5 system-ui, sans-serif; text-align: center; padding: 16px;
-    pointer-events: none; white-space: pre-line;
+    position: fixed; inset: 0; box-sizing: border-box; padding: 16px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    background:
+      linear-gradient(90deg, var(--gingham-check) 50%, transparent 50%) 0 0 / 64px 64px,
+      linear-gradient(var(--gingham-check) 50%, transparent 50%) 0 0 / 64px 64px,
+      var(--gingham);
+    color: var(--foreground);
+    font: 16px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    text-align: center; white-space: pre-line; overflow-wrap: anywhere; font-variant-numeric: tabular-nums;
+    pointer-events: none;
   }
   #status:empty { display: none; }
+  /* The download's share, as the site's progress track */
+  #status[data-progress]::after {
+    content: ""; box-sizing: border-box; width: min(240px, 100%); height: 20px;
+    border: 2px solid var(--frame); border-radius: 999px;
+    background: linear-gradient(var(--track-fill) 0 0) 0 0 / var(--progress, 0%) 100% no-repeat, var(--accent);
+  }
+  /* What went wrong can be read and copied */
+  #status[data-error] { pointer-events: auto; user-select: text; }
+  #status[data-error]::first-line { font-weight: 600; }
 </style>
 </head>
 <body>
-<div id="status">Starting…</div>
+<div id="status">正在启动…</div>
 <script type="module">
 // main.js by its content hash (build.json): a cache that kept an older one
 // would pair it with this build's game.

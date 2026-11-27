@@ -1669,6 +1669,11 @@ pub fn mob_to_nbt(
             map.remove(&horizon_world::nbt::JavaString::from(key));
         }
     }
+    // What a mod's goals keep of their own (`Goal::save`).
+    if let Tag::Compound(map) = &mut tag {
+        m.ai.goals.save(map);
+        m.ai.targets.save(map);
+    }
     tag
 }
 
@@ -2723,6 +2728,11 @@ pub fn mob_from_nbt_with_random(
     // setHealth clamps a negative health to 0; a dead mob keeps its body (tickDeath).
     if m.health < 0.0 {
         m.health = 0.0;
+    }
+    // What a mod's goals saved of their own (`Goal::load`).
+    if let Tag::Compound(map) = tag {
+        m.ai.goals.load(map);
+        m.ai.targets.load(map);
     }
     Some(m)
 }

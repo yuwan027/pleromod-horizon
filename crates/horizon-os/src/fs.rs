@@ -98,15 +98,18 @@ export function horizon_fetch_sync(url) {
     #[derive(Clone)]
     enum Node {
         Dir,
+        /// Shared with the files linked to it (`hard_link`) until one is written.
         File {
-            data: Vec<u8>,
+            data: Arc<Vec<u8>>,
             modified: SystemTime,
         },
         /// Listed by the manifest, fetched on first read: alone, or with the
-        /// rest of its pack (a `.tar.gz` of many files, one request).
+        /// rest of its pack (a `.tar.gz` of many files, one request). A link
+        /// to one names it as its `origin`, and reads its bytes through it.
         Remote {
             len: u64,
             pack: Option<Arc<str>>,
+            origin: Option<Arc<str>>,
         },
     }
 
@@ -119,9 +122,11 @@ export function horizon_fetch_sync(url) {
     }
 
     /// Scratch files and the prepared resources aren't the player's: they stay
-    /// out of the browser's storage.
+    /// out of the browser's storage. Nor does the content mods' resource root
+    /// (`.horizon-cache`), built again at each start: most of it links to the
+    /// prepared resources, which a saved copy would hold whole.
     fn persisted(key: &str) -> bool {
-        !["/tmp", "/.local"]
+        !["/tmp", "/.local", "/.horizon-cache"]
             .iter()
             .any(|root| key == *root || key.starts_with(&format!("{root}/")))
     }
@@ -150,12 +155,14 @@ export function horizon_fetch_sync(url) {
     /// Fetches a manifest file before it is read, without holding the
     /// filesystem's lock: another thread's reads go on during the request.
     fn prefetch(key: &str) {
-        let pack = match vfs().nodes.get(key) {
-            Some(Node::Remote {
-                pack: Some(pack), ..
-            }) => Some(pack.clone()),
-            _ => None,
+        let (pack, origin) = match vfs().nodes.get(key) {
+            Some(Node::Remote { pack, origin, .. }) => (pack.clone(), origin.clone()),
+            _ => (None, None),
         };
+        // A link's bytes are its origin's (the lock is free again here).
+        if let Some(origin) = origin {
+            return prefetch(&origin);
+        }
         if let Some(pack) = pack {
             fetch_pack(&pack);
             return;
@@ -169,7 +176,7 @@ export function horizon_fetch_sync(url) {
                 vfs.nodes.insert(
                     key.to_owned(),
                     Node::File {
-                        data,
+                        data: Arc::new(data),
                         modified: SystemTime::now(),
                     },
                 );
@@ -288,9 +295,10 @@ export function horizon_fetch_sync(url) {
             }
             self.nodes.insert(key, node);
         }
-        /// The file's bytes, fetching a manifest file the first time.
-        fn data(&mut self, key: &str, path: &Path) -> io::Result<&mut Vec<u8>> {
-            match self.nodes.get(key) {
+        /// The file's bytes, fetching a manifest file the first time (once for
+        /// a link and the file it links to).
+        fn bytes(&mut self, key: &str, path: &Path) -> io::Result<Arc<Vec<u8>>> {
+            let origin = match self.nodes.get(key) {
                 None => return Err(not_found(path)),
                 Some(Node::Dir) => {
                     return Err(io::Error::new(
@@ -298,23 +306,32 @@ export function horizon_fetch_sync(url) {
                         format!("{}: is a directory", path.display()),
                     ));
                 }
-                Some(Node::Remote { .. }) => {
+                Some(Node::File { data, .. }) => return Ok(data.clone()),
+                Some(Node::Remote { origin, .. }) => origin.clone(),
+            };
+            let data = match origin {
+                Some(origin) => self.bytes(&origin, path)?,
+                None => {
                     let url = remote_url(self, key).unwrap_or_default();
-                    let data = horizon_fetch_sync(&url).ok_or_else(|| {
+                    Arc::new(horizon_fetch_sync(&url).ok_or_else(|| {
                         io::Error::new(io::ErrorKind::NotFound, format!("could not fetch {url}"))
-                    })?;
-                    self.nodes.insert(
-                        key.to_owned(),
-                        Node::File {
-                            data,
-                            modified: SystemTime::now(),
-                        },
-                    );
+                    })?)
                 }
-                Some(Node::File { .. }) => {}
-            }
+            };
+            self.nodes.insert(
+                key.to_owned(),
+                Node::File {
+                    data: data.clone(),
+                    modified: SystemTime::now(),
+                },
+            );
+            Ok(data)
+        }
+        /// The file's bytes to change: its own copy when they are shared.
+        fn data(&mut self, key: &str, path: &Path) -> io::Result<&mut Vec<u8>> {
+            self.bytes(key, path)?;
             match self.nodes.get_mut(key) {
-                Some(Node::File { data, .. }) => Ok(data),
+                Some(Node::File { data, .. }) => Ok(Arc::make_mut(data)),
                 _ => unreachable!(),
             }
         }
@@ -387,7 +404,7 @@ export function horizon_fetch_sync(url) {
                         vfs.put(
                             k,
                             Node::File {
-                                data: content.to_vec(),
+                                data: Arc::new(content.to_vec()),
                                 modified: SystemTime::now(),
                             },
                         );
@@ -427,7 +444,14 @@ export function horizon_fetch_sync(url) {
                 });
             let k = key(&Path::new(root).join(path));
             if !vfs.nodes.contains_key(&k) {
-                vfs.put(k, Node::Remote { len, pack });
+                vfs.put(
+                    k,
+                    Node::Remote {
+                        len,
+                        pack,
+                        origin: None,
+                    },
+                );
             }
         }
     }
@@ -435,7 +459,13 @@ export function horizon_fetch_sync(url) {
     /// A file the page saved in the browser's storage, back in place.
     pub fn install_saved_file(path: &str, data: Vec<u8>, modified_ms: f64) {
         let modified = SystemTime::UNIX_EPOCH + Duration::from_millis(modified_ms.max(0.0) as u64);
-        vfs().put(key(Path::new(path)), Node::File { data, modified });
+        vfs().put(
+            key(Path::new(path)),
+            Node::File {
+                data: Arc::new(data),
+                modified,
+            },
+        );
     }
 
     /// A folder the page saved in the browser's storage, back in place.
@@ -448,18 +478,43 @@ export function horizon_fetch_sync(url) {
     pub fn take_changes() -> Vec<(String, Change)> {
         let mut vfs = vfs();
         let dirty = std::mem::take(&mut vfs.dirty);
-        dirty
+        let (unkept, forget) = {
+            let mut unkept = UNKEPT.lock().unwrap_or_else(|e| e.into_inner());
+            let forget = std::mem::take(&mut unkept.1);
+            (unkept.0.clone(), forget)
+        };
+        let under = |key: &str| {
+            unkept
+                .iter()
+                .any(|p| key == p || key.starts_with(&format!("{p}/")))
+        };
+        forget
             .into_iter()
-            .map(|(key, clear)| {
+            .map(|key| (key, Change::Gone))
+            .chain(dirty.into_iter().filter(|(key, _)| !under(key)).map(|(key, clear)| {
                 let change = match vfs.nodes.get(&key) {
-                    Some(Node::File { data, .. }) => Change::File(data.clone()),
+                    Some(Node::File { data, .. }) => Change::File(data.to_vec()),
                     Some(Node::Dir) => Change::Dir { clear },
                     Some(Node::Remote { .. }) | None => Change::Gone,
                 };
                 (key, change)
-            })
+            }))
             .collect()
     }
+
+    /// Folders whose files the page no longer keeps in the browser's storage (a world the
+    /// game gets from elsewhere each time): what is kept of them now is dropped once, and
+    /// nothing under them is handed to the page again.
+    pub fn unkeep(path: impl AsRef<Path>) {
+        let key = key(path.as_ref());
+        let mut unkept = UNKEPT.lock().unwrap_or_else(|e| e.into_inner());
+        if !unkept.0.contains(&key) {
+            unkept.0.push(key.clone());
+            unkept.1.push(key);
+        }
+    }
+    /// The folders `unkeep` named, and those to drop from the storage at the next `take_changes`.
+    static UNKEPT: Mutex<(Vec<String>, Vec<String>)> = Mutex::new((Vec::new(), Vec::new()));
 
     pub fn exists(path: impl AsRef<Path>) -> bool {
         vfs().nodes.contains_key(&key(path.as_ref()))
@@ -480,7 +535,7 @@ export function horizon_fetch_sync(url) {
         let path = path.as_ref();
         let k = key(path);
         prefetch(&k);
-        vfs().data(&k, path).cloned()
+        vfs().bytes(&k, path).map(|data| data.to_vec())
     }
 
     pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
@@ -505,7 +560,7 @@ export function horizon_fetch_sync(url) {
         vfs.nodes.insert(
             k,
             Node::File {
-                data: contents.as_ref().to_vec(),
+                data: Arc::new(contents.as_ref().to_vec()),
                 modified: SystemTime::now(),
             },
         );
@@ -649,9 +704,43 @@ export function horizon_fetch_sync(url) {
         ))
     }
 
-    /// No links in memory: a copy stands in.
+    /// A second name for the same bytes, as a link is: neither copied nor, for
+    /// a manifest file not fetched yet, fetched (the content mods' resource
+    /// root links to every prepared file).
     pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
-        copy(original, link).map(|_| ())
+        let (original, link) = (original.as_ref(), link.as_ref());
+        let (ok, lk) = (key(original), key(link));
+        let mut vfs = vfs();
+        let node = match vfs.nodes.get(&ok) {
+            None => return Err(not_found(original)),
+            Some(Node::Dir) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::IsADirectory,
+                    "is a directory",
+                ));
+            }
+            Some(Node::File { data, modified }) => Node::File {
+                data: data.clone(),
+                modified: *modified,
+            },
+            Some(Node::Remote { len, .. }) => Node::Remote {
+                len: *len,
+                // Its pack is fetched through the origin: as its own, the pack
+                // would be fetched again for the links still waiting.
+                pack: None,
+                origin: Some(ok.as_str().into()),
+            },
+        };
+        match parent_key(&lk).and_then(|p| vfs.nodes.get(p)) {
+            Some(Node::Dir) => {}
+            _ => return Err(not_found(link)),
+        }
+        if vfs.nodes.contains_key(&lk) {
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "already exists"));
+        }
+        vfs.touch(&lk, false);
+        vfs.nodes.insert(lk, node);
+        Ok(())
     }
 
     pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
@@ -890,7 +979,7 @@ export function horizon_fetch_sync(url) {
                 vfs.nodes.insert(
                     k.clone(),
                     Node::File {
-                        data: Vec::new(),
+                        data: Arc::new(Vec::new()),
                         modified: SystemTime::now(),
                     },
                 );
@@ -898,11 +987,12 @@ export function horizon_fetch_sync(url) {
             if !present || (self.truncate && (self.write || self.append)) {
                 vfs.touch(&k, false);
             }
-            let data = vfs.data(&k, path)?;
+            // Only a write takes the file's own copy of shared bytes.
             if self.truncate && (self.write || self.append) {
-                data.clear();
+                vfs.data(&k, path)?.clear();
             }
-            let pos = if self.append { data.len() as u64 } else { 0 };
+            let len = vfs.bytes(&k, path)?.len();
+            let pos = if self.append { len as u64 } else { 0 };
             Ok(File {
                 key: k,
                 path: path.to_path_buf(),
@@ -998,8 +1088,7 @@ export function horizon_fetch_sync(url) {
     }
     impl Read for File {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let mut vfs = vfs();
-            let data = vfs.data(&self.key, &self.path)?;
+            let data = vfs().bytes(&self.key, &self.path)?;
             let start = (self.pos as usize).min(data.len());
             let n = buf.len().min(data.len() - start);
             buf[..n].copy_from_slice(&data[start..start + n]);
@@ -1010,8 +1099,7 @@ export function horizon_fetch_sync(url) {
     impl Read for &File {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             // A shared reference has no cursor of its own: read from the start.
-            let mut vfs = vfs();
-            let data = vfs.data(&self.key, &self.path)?;
+            let data = vfs().bytes(&self.key, &self.path)?;
             let n = buf.len().min(data.len());
             buf[..n].copy_from_slice(&data[..n]);
             Ok(n)
@@ -1047,7 +1135,7 @@ export function horizon_fetch_sync(url) {
         fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
             let len = {
                 let mut vfs = vfs();
-                vfs.data(&self.key, &self.path)?.len() as i64
+                vfs.bytes(&self.key, &self.path)?.len() as i64
             };
             let next = match pos {
                 SeekFrom::Start(p) => p as i64,

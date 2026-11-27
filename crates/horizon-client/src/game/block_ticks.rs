@@ -303,6 +303,10 @@ impl Game<'_> {
                         last = Some((revision, from, next_y));
                         next.map(|(y, mask)| (y, RandomTickMaskUpdate::Replace(Some(mask))))
                     });
+                    if let Some(log) = &level.world.play_log {
+                        let at = log.len();
+                        level.world.play_marks.push((at, None));
+                    }
                 }
             });
         });

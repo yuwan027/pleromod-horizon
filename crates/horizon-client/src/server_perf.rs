@@ -16,8 +16,6 @@ use horizon_perf_format::{
 };
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
-mod tests;
 
 /// Tests that sample threads take turns: a sampler session arms every thread of the name it asks for, the other tests' too.
 #[cfg(all(test, target_os = "linux"))]

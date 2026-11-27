@@ -1997,11 +1997,18 @@ fn a_living_mod_types_row_is_its_templates_with_its_attributes() {
         id: "ruby:ghoul".into(),
         template: "minecraft:zombie".into(),
         item: None,
+        texture: None,
         damage: 0.0,
         attributes: attributes
             .iter()
             .map(|(a, v)| (a.to_string(), *v))
             .collect(),
+        width: None,
+        height: None,
+        eye_height: None,
+        sounds: None,
+        food: None,
+        spawn_placement: None,
     };
     let written = mod_entity_row(&row, &ghoul(&[("minecraft:max_health", 40.0)])).unwrap();
     let written: serde_json::Value = serde_json::from_slice(&written).unwrap();
@@ -2014,6 +2021,48 @@ fn a_living_mod_types_row_is_its_templates_with_its_attributes() {
     assert!(text.contains("0.23000000417232513"), "{text}");
     let e = mod_entity_row(&row, &ghoul(&[("minecraft:flying_speed", 1.0)])).unwrap_err();
     assert!(e.contains("not one of minecraft:zombie's"), "{e}");
+}
+
+/// a living type's own box, sounds and food replace its template's in its
+/// row; the eyes of a height given alone sit at 0.85 of it.
+#[test]
+fn a_living_mod_types_row_has_its_own_box_sounds_and_food() {
+    let cow = r#"{"width":0.9,"height":1.4,"eye_height":1.3,"category":"creature",
+        "fire_immune":false,"attributes":{"minecraft:max_health":10.0}}"#;
+    let row = serde_json::value::RawValue::from_string(cow.to_owned()).unwrap();
+    let duck = EntityType {
+        id: "ruby:duck".into(),
+        template: "minecraft:cow".into(),
+        item: None,
+        texture: None,
+        damage: 0.0,
+        attributes: Default::default(),
+        width: Some(0.5),
+        height: Some(1.0),
+        eye_height: None,
+        sounds: Some(horizon_mods::content::EntitySounds {
+            ambient: Some("ruby:entity.duck.ambient".into()),
+            step: Some("ruby:entity.duck.step".into()),
+            ..Default::default()
+        }),
+        food: Some("c:seeds".into()),
+        spawn_placement: Some(horizon_mods::content::SpawnPlacement {
+            kind: "no_restrictions".into(),
+            heightmap: None,
+            rules: "none".into(),
+        }),
+    };
+    let written: serde_json::Value =
+        serde_json::from_slice(&mod_entity_row(&row, &duck).unwrap()).unwrap();
+    assert_eq!(
+        written,
+        serde_json::json!({"width": 0.5, "height": 1.0, "eye_height": 0.85, "category": "creature",
+            "fire_immune": false, "attributes": {"minecraft:max_health": 10.0},
+            "sounds": {"ambient": "ruby:entity.duck.ambient", "step": "ruby:entity.duck.step"},
+            "food": "c:seeds", "template": "minecraft:cow",
+            "spawn_placement": {"type": "no_restrictions", "heightmap": "motion_blocking_no_leaves",
+                "rules": "none"}})
+    );
 }
 
 /// a mod's thrown entity type gets the network id after vanilla's last, the

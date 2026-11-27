@@ -7,15 +7,23 @@ import "./audio.js"; // before the game's glue, which keeps the AudioContext it 
 const ROOT = ".local/horizon-client/26.3";
 const status = document.getElementById("status");
 
+// What the page says while the game loads; a `progress` (0 to 1) shows its bar.
+function show(text, progress) {
+    status.textContent = text;
+    status.toggleAttribute("data-progress", progress !== undefined);
+    if (progress !== undefined) status.style.setProperty("--progress", `${progress * 100}%`);
+}
+
 // Whether this browser can draw the game; says why not on the page.
 async function webgpu() {
     if (!navigator.gpu) {
-        status.textContent = `Horizon needs WebGPU, which this browser doesn't offer.`;
+        status.dataset.error = "";
+        show("此浏览器不支持 WebGPU，无法运行游戏。\n请换用最新版的 Chrome 或 Edge。");
         return false;
     }
     if (!(await navigator.gpu.requestAdapter().catch(() => null))) {
-        status.textContent = "Horizon needs WebGPU, and this browser offers it but found no GPU to use " +
-            `(it may be switched off, or the graphics driver not supported).`;
+        status.dataset.error = "";
+        show("此浏览器支持 WebGPU，但找不到可用的显卡。\n显卡加速可能已关闭，或显卡驱动不受支持。");
         return false;
     }
     return true;
@@ -68,7 +76,8 @@ async function versioned() {
     const glue = files["pkg/horizon-client.js"];
     globalThis.horizonWorkerScript = glue ? `worker.js?v=${files["worker.js"] ?? ""}&glue=${glue}` : "worker.js";
     return { wasm: at("pkg/horizon-client_bg.wasm"), boot: at("fs/boot.tar.gz"), glue: `./${at("pkg/horizon-client.js")}`,
-        manifest: at("fs/manifest.txt") };
+        manifest: at("fs/manifest.txt"), mods: files["fs/mods.tar.gz"] ? at("fs/mods.tar.gz") : null,
+        content: files["fs/content.tar.gz"] ? at("fs/content.tar.gz") : null };
 }
 
 async function download(url, label) {
@@ -79,7 +88,7 @@ async function download(url, label) {
     const counted = response.body.pipeThrough(new TransformStream({
         transform(chunk, controller) {
             received += chunk.length;
-            if (total) status.textContent = `${label} ${Math.round((received / total) * 100)}%`;
+            if (total) show(`${label} ${Math.round((received / total) * 100)}%`, received / total);
             controller.enqueue(chunk);
         },
     }));
@@ -233,31 +242,46 @@ async function served() {
     await cacheWorker();
     // The game's threads share memory, which browsers allow only on a
     // cross-origin isolated page.
-    if (!window.crossOriginIsolated) throw new Error("the page can't share memory with the game's threads");
+    if (!window.crossOriginIsolated) throw new Error("页面无法与游戏的线程共享内存");
     const files = await versioned();
-    status.textContent = "Loading the game…";
+    show("正在加载游戏…");
     // The resources download and unpack while the module downloads and
     // compiles (a first visit waited for one, then the other).
-    const tar = download(files.boot, "Downloading resources")
-        .then((gz) => new Response(gz.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+    const tar = download(files.boot, "正在下载资源")
+        .then((gz) => new Response(gz.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
+        // The module may still be on its way: no bar stuck at 100% meanwhile.
+        .then((buffer) => (show("正在加载游戏…"), buffer));
     const manifest = fetch(files.manifest).then((r) => r.text());
+    // The content of the mods built into this game (build.sh), when it has any.
+    const mods = files.mods && fetch(files.mods)
+        .then((r) => new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
     // A failure while the module loads leaves these unread: not unhandled.
     tar.catch(() => {});
     manifest.catch(() => {});
+    // The root the game lays that content over the resources in, built ahead (build.sh).
+    const content = files.content && fetch(files.content)
+        .then((r) => new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+    mods?.catch(() => {});
+    content?.catch(() => {});
     const glue = await import(files.glue);
     globalThis.horizon = glue; // horizon.horizon_status() and the like, from the console
     // Runs the game's main, which only registers the game to start.
     await glue.default({ module_or_path: files.wasm });
-    return { glue, tar: new Uint8Array(await tar), manifest: await manifest, base: "fs/res/" };
+    return { glue, tar: new Uint8Array(await tar), manifest: await manifest, base: "fs/res/",
+        mods: mods && new Uint8Array(await mods), content: content && new Uint8Array(await content) };
 }
 
 async function main() {
     if (!(await webgpu())) return;
-    const { glue, tar, manifest, base } = await served();
-    status.textContent = "Installing resources…";
+    const { glue, tar, manifest, base, mods, content } = await served();
+    show("正在安装资源…");
     const t0 = performance.now();
     const installed = glue.horizon_install_tar(ROOT, tar);
     glue.horizon_install_manifest(ROOT, base, manifest);
+    // Beside the game, where it finds its native mods' content (native-content/<id>/), always on.
+    if (mods) glue.horizon_install_tar("/", mods);
+    // In the game's folder, where it keeps the roots it builds (.horizon-cache/mod-content/).
+    if (content) glue.horizon_install_tar("/", content);
     console.log(`Horizon: ${installed} files installed in ${Math.round(performance.now() - t0)} ms`);
 
     const root = await savedRoot();
@@ -272,10 +296,18 @@ async function main() {
         addEventListener("pagehide", () => saveChanges(glue, root));
     }
 
-    status.textContent = "Loading resources…";
+    show("正在加载资源…");
     // Let the status paint before the game blocks the page while it loads.
     await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-    status.textContent = "";
+    // The status stays over the canvas until the game has its loading screen or title on it.
+    addEventListener("horizon-shown", () => (status.textContent = ""), { once: true });
+    // The shared world's API (pleromod.com sets `horizonPlay` itself): a local one while
+    // developing (apps/api, or a stand-in, on its port 4000), another with ?play=<address of /v1/play>,
+    // none with ?play=off (a world of the game's own, kept in the browser).
+    const play = new URLSearchParams(location.search).get("play") ?? "http://localhost:4000/v1/play";
+    if (!globalThis.horizonPlay && play !== "off") globalThis.horizonPlay = { api: play };
+    // ?trace: the start's steps and how long each took, on the console.
+    if (new URLSearchParams(location.search).has("trace")) globalThis.horizonStartupTrace = true;
     // The game's command-line arguments, from the address: ?args=--world%20T
     const args = (new URLSearchParams(location.search).get("args") ?? "").split(" ").filter(Boolean);
     try {
@@ -291,7 +323,8 @@ main().catch((e) => {
     // The game's workers share memory, which browsers allow only on a
     // cross-origin isolated page.
     const isolation = window.crossOriginIsolated ? "" :
-        "\n\nThe page isn't cross-origin isolated: its server must send " +
-        "Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp.";
-    status.textContent = `Horizon could not start:\n${e}${isolation}`;
+        "\n\n页面未跨源隔离：服务器须发送 " +
+        "Cross-Origin-Opener-Policy: same-origin 和 Cross-Origin-Embedder-Policy: require-corp。";
+    status.dataset.error = "";
+    show(`游戏无法启动\n${e?.message ?? e}${isolation}`);
 });

@@ -196,8 +196,38 @@ pub fn pool() -> &'static Pool {
                 n => n,
             });
         // The name the crash reports know a worker by (vanilla's `Util` workers).
-        Pool::new(threads, "horizon-worker")
+        let pool = Pool::new(threads, "horizon-worker");
+        // The page's scoped threads (`horizon_os::thread::scope`) are this pool's jobs: the
+        // resource load's steps run side by side on its workers, as on native threads.
+        #[cfg(target_arch = "wasm32")]
+        if pool.has_workers() {
+            std::mem::forget(pool.register(Arc::new(ScopedThreads)));
+            horizon_os::workers::scoped::serve(|| {
+                if let Some(pool) = POOL.get() {
+                    pool.notify();
+                }
+            });
+        }
+        pool
     })
+}
+
+/// The scopes' threads waiting for a worker, ahead of everything else: a scope's own thread
+/// waits for them.
+#[cfg(target_arch = "wasm32")]
+struct ScopedThreads;
+
+#[cfg(target_arch = "wasm32")]
+impl Source for ScopedThreads {
+    fn next(&self) -> Option<Rank> {
+        horizon_os::workers::scoped::queued().then_some(Rank::new(Class::Urgent, i64::MIN))
+    }
+    fn run(&self, _worker: usize) -> bool {
+        horizon_os::workers::scoped::run_queued()
+    }
+    fn label(&self) -> &'static str {
+        "scoped threads"
+    }
 }
 
 impl Pool {

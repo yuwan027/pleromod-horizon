@@ -115,21 +115,14 @@ pub(super) fn features(adapter: &wgpu::Adapter, traces: bool) -> wgpu::Features 
     features
 }
 
-fn pick(requested: bool, offered: wgpu::Features) -> wgpu::Features {
-    if requested {
-        offered & RAY_QUERY
-    } else {
-        wgpu::Features::empty()
-    }
+/// This build has no hardware ray queries: wgpu's experimental features stay off.
+fn pick(_requested: bool, _offered: wgpu::Features) -> wgpu::Features {
+    wgpu::Features::empty()
 }
 
 /// The device's opt-in to `features`' experimental ones.
-pub(super) fn experimental(features: wgpu::Features) -> wgpu::ExperimentalFeatures {
-    if features.contains(RAY_QUERY) {
-        horizon_hdr::experimental_features()
-    } else {
-        wgpu::ExperimentalFeatures::disabled()
-    }
+pub(super) fn experimental(_features: wgpu::Features) -> wgpu::ExperimentalFeatures {
+    wgpu::ExperimentalFeatures::disabled()
 }
 
 /// What ray tracing is on a renderer to a pack that declares `[ray_tracing]`: `offered`, its
@@ -190,11 +183,10 @@ mod tests {
     }
 
     #[test]
-    fn ray_queries_only_when_asked_and_offered() {
+    fn no_ray_queries_even_when_asked_and_offered() {
         let all = wgpu::Features::all();
-        assert_eq!(pick(true, all), RAY_QUERY);
+        assert!(pick(true, all).is_empty());
         assert!(pick(false, all).is_empty());
-        assert!(pick(true, all - RAY_QUERY).is_empty());
-        assert!(!experimental(wgpu::Features::empty()).is_enabled());
+        assert!(!experimental(all).is_enabled());
     }
 }

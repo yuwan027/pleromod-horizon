@@ -58,6 +58,7 @@ fn kind(eye_height: f64) -> Arc<MobType> {
         step_sound: None,
         food: Arc::default(),
         tempt: Arc::default(),
+        spawn_placement: None,
     })
 }
 

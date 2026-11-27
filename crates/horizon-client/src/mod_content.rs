@@ -912,6 +912,43 @@ fn mod_entity_row(
             to_raw_value(&attributes).map_err(fail)?,
         );
     }
+    // Its own box: the eyes sit at 0.85 of a height given alone, as
+    // `EntityDimensions.scalable` puts them.
+    let eye_height = t.eye_height.or(t.height.map(|h| h * 0.85));
+    for (key, value) in [
+        ("width", t.width),
+        ("height", t.height),
+        ("eye_height", eye_height),
+    ] {
+        if let Some(value) = value {
+            fields.insert(key.into(), to_raw_value(&value).map_err(fail)?);
+        }
+    }
+    if let Some(sounds) = &t.sounds {
+        let named: BTreeMap<&str, &String> = [
+            ("ambient", &sounds.ambient),
+            ("hurt", &sounds.hurt),
+            ("death", &sounds.death),
+            ("step", &sounds.step),
+        ]
+        .into_iter()
+        .filter_map(|(key, sound)| Some((key, sound.as_ref()?)))
+        .collect();
+        fields.insert("sounds".into(), to_raw_value(&named).map_err(fail)?);
+    }
+    if let Some(food) = &t.food {
+        fields.insert("food".into(), to_raw_value(food).map_err(fail)?);
+    }
+    if let Some(placement) = &t.spawn_placement {
+        // Where it may spawn (`SpawnPlacements`), which `MobTypes` reads.
+        let heightmap = placement.heightmap.as_deref();
+        let row = serde_json::json!({
+            "type": placement.kind,
+            "heightmap": heightmap.unwrap_or("motion_blocking_no_leaves"),
+            "rules": placement.rules,
+        });
+        fields.insert("spawn_placement".into(), to_raw_value(&row).map_err(fail)?);
+    }
     fields.insert("template".into(), to_raw_value(&t.template).map_err(fail)?);
     serde_json::to_vec(&fields).map_err(fail)
 }
@@ -3102,12 +3139,71 @@ pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<P
         let _ = fs::write(used_path(&out), b"");
         return Ok(out);
     }
+    // The page's build made this root ahead (web/content_root.py): only its links are left.
+    match link_prebuilt(&out, &stamp) {
+        Some(Ok(())) => {
+            let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
+            warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
+            fs::write(out.join(STAMP), stamp)?;
+            log::info!("Horizon: content root made ahead, linked");
+            return Ok(out);
+        }
+        Some(Err(e)) => log::warn!("Horizon: the content root made ahead is unusable ({e}); building it"),
+        None => {}
+    }
     for warning in build(base, mods, &out)? {
         log::warn!("Horizon: {warning}");
     }
     fs::write(out.join(STAMP), stamp)?;
     prune_roots(&roots, &out, KEEP_ROOTS);
     Ok(out)
+}
+
+/// In a root made ahead of the game's start (web/content_root.py, from a root the native game
+/// built): the root's stamp, then one `path<TAB>file or folder` per line for what the root
+/// only links to, the base's files and the mods' own. The files [`build`] writes are there.
+const PREBUILT: &str = "horizon-mod-content.prebuilt";
+
+/// Finishes the root at `out` when it was made ahead for exactly this `stamp`: makes its
+/// links, which an archive cannot carry. None when there is no such root: it is built here.
+/// The page builds its root at every start otherwise (nothing of it is kept between visits),
+/// seconds of rewriting the per-state tables before anything can load.
+fn link_prebuilt(out: &Path, stamp: &str) -> Option<Result<()>> {
+    let text = fs::read_to_string(out.join(PREBUILT)).ok()?;
+    let mut lines = text.lines();
+    if lines.next() != Some(stamp) {
+        log::info!("Horizon: the content root made ahead is of other content; building it");
+        return None;
+    }
+    let _step = crate::spans::startup::step("mods.prebuilt_links");
+    Some(lines.try_for_each(|line| -> Result<()> {
+        let (rel, from) = line
+            .split_once('\t')
+            .ok_or_else(|| format!("{PREBUILT}: no file to link in {line:?}"))?;
+        // What the page was not given (other languages, the Nether's structures): the root
+        // built here would not link to it either.
+        if !Path::new(from).fs_exists() {
+            return Ok(());
+        }
+        let at = out.join(rel);
+        if let Some(parent) = at.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        link(Path::new(from), &at).map_err(|e| format!("{PREBUILT}: {rel}: {e}"))?;
+        Ok(())
+    }))
+}
+
+/// Whether [`stamp`] names what a root is built from and not where or when: the page's
+/// files are unpacked at each visit, and the build that makes its root ahead reads them
+/// in another folder.
+static PORTABLE_STAMP: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(cfg!(target_arch = "wasm32"));
+
+/// From now on roots are stamped as the page stamps them: for the native run that builds
+/// the page's root ahead (`HORIZON_WEB_CONTENT`).
+pub fn stamp_as_the_page() {
+    PORTABLE_STAMP.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The length of a root's folder name: the start of its stamp.
@@ -3216,8 +3312,13 @@ const STAMP: &str = "horizon-mod-content.stamp";
 /// in order. Files count by size and modification time, as build tools do.
 fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let meta = |path: &Path| -> Result<String> {
+    let portable = PORTABLE_STAMP.load(std::sync::atomic::Ordering::Relaxed);
+    // `name`: the file within the base or its mod, which a portable stamp knows it by.
+    let meta = |path: &Path, name: &str| -> Result<String> {
         let m = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if portable {
+            return Ok(format!("{name} {}", m.len()));
+        }
         let modified = m
             .modified()?
             .duration_since(horizon_os::time::UNIX_EPOCH)
@@ -3229,15 +3330,22 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
             modified.as_nanos()
         ))
     };
-    let mut parts = vec!["horizon mod content 1".to_owned()];
-    parts.push(meta(&horizon_os::env::current_exe()?)?);
+    let mut parts = vec![match portable {
+        true => "horizon mod content 1, portable".to_owned(),
+        false => "horizon mod content 1".to_owned(),
+    }];
+    // The browser's game is no file, and its roots are not kept beyond the page (horizon-os's `persisted`).
+    #[cfg(not(target_arch = "wasm32"))]
+    if !portable {
+        parts.push(meta(&horizon_os::env::current_exe()?, "")?);
+    }
     let base = horizon_os::env::absolute(base)?;
     parts.push(
         String::from_utf8_lossy(&fs::read(base.join("horizon-resources.json"))?).into_owned(),
     );
     for name in JSON_TABLES.iter().chain(&NBT_TABLES).chain(&TAG_BUNDLES) {
         if base.join(name).fs_exists() {
-            parts.push(meta(&base.join(name))?);
+            parts.push(meta(&base.join(name), name)?);
         }
     }
     for m in mods {
@@ -3248,11 +3356,17 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
         if m.content.files.is_empty() {
             // Declared in code only: nothing to read.
         } else if source.fs_is_dir() {
+            let mut files = Vec::with_capacity(m.content.files.len());
             for file in &m.content.files {
-                parts.push(meta(&source.join(file))?);
+                files.push(meta(&source.join(file), file)?);
             }
+            // Folders list their files in another order on another system.
+            if portable {
+                files.sort();
+            }
+            parts.append(&mut files);
         } else {
-            parts.push(meta(source)?);
+            parts.push(meta(source, &m.id)?);
         }
     }
     let mut hasher = Sha256::new();

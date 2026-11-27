@@ -345,7 +345,7 @@ impl Game<'_> {
         }
         let back = self.dim;
         for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
-            if dim == back || self.levels.parked.contains_key(&dim) {
+            if dim == back || !dim.reachable() || self.levels.parked.contains_key(&dim) {
                 continue;
             }
             let save = SaveDir::new(
@@ -508,6 +508,9 @@ impl Game<'_> {
         // A client holds no levels.
         if self.options.execution_role.is_client() {
             return Ok(());
+        }
+        if !target.reachable() {
+            return Err(format!("{} is not in this build", target.id()).into());
         }
         if target != self.dim {
             let (mut p, opened) = match self.levels.parked.remove(&target) {

@@ -282,6 +282,9 @@ pub(super) struct Station {
     pub(super) inputs: Vec<Option<ItemStack>>,
     pub(super) result: Option<ItemStack>,
     pub(super) offers: EnchantOffers,
+    /// The offers when a native mod made them (`native_enchant_offers`), with what the screen
+    /// shows of them.
+    pub(super) mod_offers: Option<super::native_enchanting::NativeEnchantOffers>,
     bookcases: i32,
     pub(super) anvil: AnvilResult,
     /// Anvil rename box text (`AnvilMenu.itemName`).
@@ -323,6 +326,7 @@ impl Station {
             inputs: vec![None; kind.inputs()],
             result: None,
             offers: EnchantOffers::default(),
+            mod_offers: None,
             bookcases: 0,
             anvil: AnvilResult::default(),
             name: String::new(),
@@ -389,6 +393,16 @@ fn stonecutter_drag_offs(y: f32) -> f32 {
     ((y - 14.0 - 7.5) / (54.0 - 15.0)).clamp(0.0, 1.0)
 }
 
+/// A native mod's offers (`native_enchant_offers`) as the table holds them.
+fn mod_offers(made: &super::native_enchanting::NativeEnchantOffers) -> EnchantOffers {
+    EnchantOffers {
+        costs: made.costs,
+        clues: made
+            .clues
+            .clone()
+            .map(|clue| clue.map(|(id, level)| (std::sync::Arc::from(id), level))),
+    }
+}
 /// The 108x19 enchantment button `i` (relative to the GUI origin).
 fn enchant_button(i: usize) -> (f32, f32, f32, f32) {
     (60.0, 14.0 + 19.0 * i as f32, 108.0, 19.0)
@@ -691,16 +705,26 @@ impl Game<'_> {
                 if !enchantable {
                     s.offers = Default::default();
                 }
+                // A mod's own offers, asked again here for what the screen shows of them.
+                s.mod_offers = self.mod_enchant_offers(s.pos, s.inputs[0].as_ref());
+                if let Some(made) = &s.mod_offers {
+                    s.offers = mod_offers(made);
+                }
             }
             Kind::Enchanting => {
                 s.bookcases = self.count_bookshelves(s.pos);
-                s.offers = stations::enchant_offers(
-                    &enchantments,
-                    items,
-                    self.level.xp_seed,
-                    s.bookcases,
-                    s.inputs[0].as_ref(),
-                );
+                // `native_enchant_offers`, where `slotsChanged` begins.
+                s.mod_offers = self.mod_enchant_offers(s.pos, s.inputs[0].as_ref());
+                s.offers = match &s.mod_offers {
+                    Some(made) => mod_offers(made),
+                    None => stations::enchant_offers(
+                        &enchantments,
+                        items,
+                        self.level.xp_seed,
+                        s.bookcases,
+                        s.inputs[0].as_ref(),
+                    ),
+                };
             }
             Kind::Anvil => {
                 let name = self.anvil_item_name(&s);
@@ -1013,6 +1037,10 @@ impl Game<'_> {
     }
     /// `EnchantmentMenu.clickMenuButton`.
     fn click_enchant(&mut self, button: usize) {
+        // `native_enchant_click`, before any of vanilla's checks.
+        if self.mod_enchant_click(button) {
+            return;
+        }
         let Some(s) = self.station.as_ref() else {
             return;
         };
@@ -1635,7 +1663,12 @@ impl Game<'_> {
                     }
                     let mut names = LegacyRandom::new(i64::from(self.level.xp_seed));
                     let gold = s.inputs[1].as_ref().map_or(0, |l| l.count as i32);
-                    let level = self.experience.level;
+                    // A mod's offers may not ask for the level (`ignores_level`).
+                    let level = s
+                        .mod_offers
+                        .as_ref()
+                        .map_or(self.experience.level, |m| m.level(self.experience.level));
+                    let mod_tooltip = s.mod_offers.as_ref().map(|m| m.tooltip.clone());
                     let offers = s.offers.clone();
                     for i in 0..3 {
                         let (bx, by, bw, bh) = enchant_button(i);
@@ -1736,8 +1769,24 @@ impl Game<'_> {
                             argb(col),
                             true,
                         );
-                        // Tooltip with the clue (EnchantmentScreen.extractRenderState).
+                        // A mod's lines in place of the clue's (`NativeEnchantOffers::tooltip`).
                         if inside(local, bx, by, bw, 17.0)
+                            && let Some(lines) = mod_tooltip.as_ref().filter(|l| !l.is_empty())
+                        {
+                            let lines = lines.iter().map(|(key, color)| {
+                                let color = color
+                                    .as_deref()
+                                    .and_then(horizon_client::text::named_color)
+                                    .map_or(u32::MAX, |c| {
+                                        rgba((c >> 16) as u8, (c >> 8) as u8, c as u8, 255)
+                                    });
+                                (
+                                    horizon_client::text::Text::literal(self.translate(key, key)),
+                                    color,
+                                )
+                            });
+                            tooltip = Some(lines.collect());
+                        } else if inside(local, bx, by, bw, 17.0)
                             && let Some((id, l)) = &offers.clues[i]
                         {
                             let e = self.enchantments();
@@ -2539,6 +2588,15 @@ impl Game<'_> {
                     rgba(255, 85, 85, 255),
                 ));
             }
+        }
+        // The shared world's prices of the block the item places.
+        if !nested
+            && !lines.is_empty()
+            && super::play_world::active()
+            && let Some(block) = self.items().get(&stack.item).and_then(|i| i.block)
+            && let Some(line) = super::play_world::tooltip(&self.res.facts().get(block).name)
+        {
+            lines.push((line.with_color(horizon_client::text::GOLD), u32::MAX));
         }
         // Native mods last, once getTooltipLines has built every line; a
         // tooltip the stack hides stays hidden.

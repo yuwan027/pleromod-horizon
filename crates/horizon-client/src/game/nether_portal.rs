@@ -326,7 +326,8 @@ impl Game<'_> {
     }
     /// `ServerLevel.isAllowedToEnterPortal`.
     pub(super) fn may_enter(&self, target: Dim) -> bool {
-        target != Dim::Nether || self.ui.rules.bool("allow_entering_nether_using_portals")
+        target.reachable()
+            && (target != Dim::Nether || self.ui.rules.bool("allow_entering_nether_using_portals"))
     }
     /// The plan of an entity of `width` by `height` at `at` going through the
     /// portal at `entry` (`getDimensionTransitionFromExit` and the scaled,
@@ -1628,7 +1629,8 @@ impl Game<'_> {
     /// BaseFireBlock.onPlace: lighting fire inside a frame creates a portal,
     /// only in the Overworld and the Nether (`inPortalDimension`).
     pub(super) fn try_light_portal(&mut self, at: [i32; 3]) -> Result<bool> {
-        if !matches!(self.dim, Dim::Overworld | Dim::Nether) {
+        // Without the Nether (the browser build) no frame lights.
+        if !matches!(self.dim, Dim::Overworld | Dim::Nether) || !Dim::Nether.reachable() {
             return Ok(false);
         }
         for x_axis in [true, false] {

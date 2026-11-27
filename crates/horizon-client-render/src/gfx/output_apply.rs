@@ -363,10 +363,7 @@ impl Renderer {
         }
         if let Some(hdr) = &mut self.hdr {
             hdr.ui = next.ui_brightness;
-            if (hdr.paper_white, hdr.peak, hdr.black) != (paper_white, peak, black) {
-                (hdr.paper_white, hdr.peak, hdr.black) = (paper_white, peak, black);
-                self.send_hdr_metadata();
-            }
+            (hdr.paper_white, hdr.peak, hdr.black) = (paper_white, peak, black);
         }
         self.output = next;
     }

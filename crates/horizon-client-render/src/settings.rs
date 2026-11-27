@@ -411,9 +411,16 @@ impl Settings {
                     mods,
                     ..Self::default()
                 };
-                // The browser's first start picks the Performance preset.
+                // The browser's first start picks the Performance preset, and
+                // Chinese: the web build is pleromod.com's, whose players read it.
                 #[cfg(target_arch = "wasm32")]
-                crate::graphics::apply_preset(crate::graphics::Preset::Performance, &mut settings);
+                {
+                    crate::graphics::apply_preset(
+                        crate::graphics::Preset::Performance,
+                        &mut settings,
+                    );
+                    settings.language = "zh_cn".into();
+                }
                 settings
             }
         };

@@ -86,7 +86,7 @@ impl State {
                 let name = CHARACTERS[i];
                 name[..1].to_uppercase() + &name[1..]
             }
-            Skin::Custom => "Imported Skin".into(),
+            Skin::Custom => crate::lang::get_or("horizon.profile.imported_skin", "Imported Skin"),
         }
     }
 }
@@ -110,29 +110,30 @@ pub(super) fn buttons(state: &State, w: f32, h: f32) -> Vec<Button> {
         action: None,
     };
     let arms = if state.profile.slim {
-        "Arms: Slim"
+        crate::lang::get_or("horizon.profile.arms.slim", "Arms: Slim")
     } else {
-        "Arms: Classic"
+        crate::lang::get_or("horizon.profile.arms.classic", "Arms: Classic")
     };
     let cape = if state.profile.cape {
-        "Remove Cape"
+        crate::lang::get_or("horizon.profile.remove_cape", "Remove Cape")
     } else {
-        "Import Cape..."
+        crate::lang::get_or("horizon.profile.import_cape", "Import Cape...")
     };
+    let import_skin = crate::lang::get_or("horizon.profile.import_skin", "Import Skin...");
+    let done = crate::lang::get_or("gui.done", "Done");
     let valid = crate::offline_name::is_valid(&state.profile.name);
     let (h, cx) = (h.ceil(), (w.ceil() / 2.0).floor());
     let mut buttons = vec![
         b(x, 92.0, 20.0, "<", true, PREVIOUS),
         b(x + 22.0, 92.0, 156.0, &state.skin_label(), true, SKIN),
         b(x + 180.0, 92.0, 20.0, ">", true, NEXT),
-        b(x, 116.0, 200.0, arms, true, ARMS),
-        b(x, 140.0, 98.0, "Import Skin...", true, IMPORT_SKIN),
-        b(x + 102.0, 140.0, 98.0, cape, true, CAPE),
+        b(x, 116.0, 200.0, &arms, true, ARMS),
+        b(x, 140.0, 98.0, &import_skin, true, IMPORT_SKIN),
+        b(x + 102.0, 140.0, 98.0, &cape, true, CAPE),
     ];
     if state.first {
-        buttons.push(b(cx - 100.0, h - 28.0, 200.0, "Done", valid, DONE));
+        buttons.push(b(cx - 100.0, h - 28.0, 200.0, &done, valid, DONE));
     } else {
-        let done = crate::lang::get_or("gui.done", "Done");
         let cancel = crate::lang::get_or("gui.cancel", "Cancel");
         buttons.push(b(cx - 154.0, h - 28.0, 150.0, &done, valid, DONE));
         buttons.push(b(cx + 4.0, h - 28.0, 150.0, &cancel, true, CANCEL));
@@ -176,10 +177,12 @@ pub(super) fn draw(
 ) {
     let (w, h) = (batch.width.ceil(), batch.height.ceil());
     crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
-    centered(atlas, batch, "Edit Profile", 15.0, u32::MAX);
+    let heading = crate::lang::get_or("horizon.profile.title", "Edit Profile");
+    centered(atlas, batch, &heading, 15.0, u32::MAX);
     let x = column(w);
     let gray = rgba(160, 160, 160, 255);
-    batch.text(atlas, "Username", x, 40.0, gray, true);
+    let username = crate::lang::get_or("horizon.profile.username", "Username");
+    batch.text(atlas, &username, x, 40.0, gray, true);
     let field = name_rect(w);
     title.caret.borrow_mut().draw(
         batch,
@@ -189,7 +192,8 @@ pub(super) fn draw(
         state.focused,
         title.started,
     );
-    batch.text(atlas, "Skin", x, 80.0, gray, true);
+    let skin = crate::lang::get_or("horizon.profile.skin", "Skin");
+    batch.text(atlas, &skin, x, 80.0, gray, true);
     if let Some(message) = &state.message {
         for (i, line) in super::wrapped(atlas, message, 200.0).iter().enumerate() {
             batch.text(atlas, line, x, 166.0 + i as f32 * 10.0, gray, true);
@@ -307,7 +311,7 @@ impl Title {
         }
         let dir = dir();
         if let Err(e) = profile::save(&dir, &state.profile) {
-            state.message = Some(format!("Could not save the profile: {e}"));
+            state.message = Some(crate::lang::tr("horizon.profile.save_failed", &[&e]));
             return;
         }
         profile::apply(&dir, &self.resources, &state.profile);

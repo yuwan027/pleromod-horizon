@@ -435,6 +435,10 @@ impl PlayerEffects {
             if let Some((a, id, amount, op)) = effect_modifier(e.id) {
                 out.push((a, id, amount * f64::from(e.amplifier + 1), op));
             }
+            // A content mod's effect: what its declaration lists.
+            for m in potions::mod_effect_modifiers(e.id) {
+                out.push((m.attribute, m.id, m.value(e.amplifier), m.operation));
+            }
         }
         out
     }

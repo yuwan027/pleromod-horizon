@@ -498,6 +498,9 @@ pub mod startup {
             horizon_os::fs::File::create(&path).ok().map(Mutex::new)
         });
         ON.store(sink.is_some(), Ordering::Relaxed);
+        // The page has no file to write: `?trace` logs each step on the console instead.
+        #[cfg(target_arch = "wasm32")]
+        ON.store(horizon_os::web::startup_trace(), Ordering::Relaxed);
     }
 
     /// Whether a trace is being written.
@@ -513,6 +516,12 @@ pub mod startup {
     }
 
     fn write(event: std::fmt::Arguments) {
+        #[cfg(target_arch = "wasm32")]
+        if on() {
+            let thread = horizon_os::thread::current();
+            log::info!("startup trace [{}] {event}", thread.name().unwrap_or("page"));
+            return;
+        }
         let Some(Some(sink)) = SINK.get() else {
             return;
         };

@@ -410,6 +410,31 @@ pub struct Menu {
     /// the player's inventory (`native_recipe_sources`): the caller fills
     /// them before and reads them back after.
     pub sources: Vec<Vec<Option<ItemStack>>>,
+    /// What the mods say of a mod menu type's container slots now
+    /// (`set_mod_slot_states`); a slot past the list is as its type has it.
+    mod_states: Vec<ModSlotState>,
+}
+
+/// A container slot of a content mod's menu type as its mod has it right now
+/// (`native_menu_slot_state`): `Slot.mayPickup`, a `Slot.mayPlace` that
+/// depends on the block and not the stack, and `Slot.isActive`. A slot that
+/// is not shown takes no click and no shift-click, as one its screen leaves
+/// out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModSlotState {
+    pub may_pickup: bool,
+    pub may_place: bool,
+    pub shown: bool,
+}
+
+impl Default for ModSlotState {
+    fn default() -> Self {
+        Self {
+            may_pickup: true,
+            may_place: true,
+            shown: true,
+        }
+    }
 }
 
 /// `AnvilMenu`'s state besides its slots and `cost`.
@@ -857,6 +882,7 @@ impl Menu {
             anvil_hook: false,
             anvil_craft: None,
             enchant_changed: false,
+            mod_states: Vec::new(),
             enchant_button: None,
             may_build: true,
             mount: None,
@@ -939,6 +965,19 @@ impl Menu {
             return;
         }
         self.data[id] = value;
+    }
+
+    /// What the mods say of a mod menu type's container slots, from slot 0:
+    /// set before a click, since a machine's slots change with what it does.
+    pub fn set_mod_slot_states(&mut self, states: Vec<ModSlotState>) {
+        self.mod_states = states;
+    }
+
+    fn mod_state(&self, s: usize) -> ModSlotState {
+        match self.slots[s].role {
+            Role::Mod | Role::ModResult => self.mod_states.get(s).copied().unwrap_or_default(),
+            _ => ModSlotState::default(),
+        }
     }
 
     /// Container slot `slot` of a mod menu type is left out by its screen.
@@ -1167,6 +1206,9 @@ impl Menu {
         } else {
             self.data[..3].fill(0);
             self.data[4..].fill(-1);
+            // Any other item: a native mod may still make offers for it
+            // (`native_enchant_offers`), which the level asks.
+            self.enchant_changed = self.containers[MAIN][0].is_some();
         }
     }
 
@@ -1451,7 +1493,10 @@ impl Menu {
                 e.slot == slot && self.mount.as_deref().is_some_and(|m| e.allows(m))
             }),
             Role::Shulker => fits_inside_container_items(stack),
-            Role::Mod | Role::ModResult => self.mod_slot(s, stack).0,
+            Role::Mod | Role::ModResult => {
+                let state = self.mod_state(s);
+                state.shown && state.may_place && self.mod_slot(s, stack).0
+            }
             Role::Hidden => false,
             Role::Fuel => Self::is_fuel(env, stack) || Self::is_bucket(stack),
             Role::Output | Role::CraftResult | Role::Inert => false,
@@ -1505,6 +1550,10 @@ impl Menu {
     fn may_pickup(&self, env: &Env, s: usize) -> bool {
         match self.slots[s].role {
             Role::Inert | Role::Hidden => false,
+            Role::Mod | Role::ModResult => {
+                let state = self.mod_state(s);
+                state.shown && state.may_pickup
+            }
             // AnvilMenu.mayPickup: the levels to pay, and a price.
             Role::CombineResult if self.kind == Kind::Anvil => {
                 (self.creative || self.levels >= self.data[0]) && self.data[0] > 0
@@ -2191,11 +2240,12 @@ impl Menu {
                 // A mod menu's result (unless a mod's hook opens it) and a
                 // hidden slot get no top-up either, as a furnace's quick move
                 // never aims at its result.
+                let state = self.mod_state(dest);
                 let refuses = match self.slots[dest].role {
                     Role::Hidden => true,
                     Role::ModResult => !self.mod_slot(dest, stack).0,
                     _ => false,
-                };
+                } || !(state.shown && state.may_place);
                 let max = match self.slot(dest) {
                     Some(target) if !refuses && target.same_item_same_components(stack) => {
                         self.slot_max(env, dest, target)
@@ -2870,7 +2920,10 @@ impl Menu {
             return Ok(());
         }
         // A slot the mod's screen leaves out takes no click.
-        if in_range(slot_index) && self.slots[slot_index as usize].role == Role::Hidden {
+        if in_range(slot_index)
+            && (self.slots[slot_index as usize].role == Role::Hidden
+                || !self.mod_state(slot_index as usize).shown)
+        {
             return Ok(());
         }
         if matches!(input, Input::Pickup | Input::QuickMove) && (button == 0 || button == 1) {
@@ -4086,6 +4139,36 @@ pub(crate) mod tests {
             menu.click(env, 0, 0, Input::Pickup).unwrap();
             menu.click(env, 31, 0, Input::QuickMove).unwrap();
             assert_eq!((n(menu.slot(0)), n(menu.player_item(0))), (None, Some(3)));
+            // What a mod says of a slot now (`native_menu_slot_state`): slot 1 gives nothing
+            // up and takes nothing, by a click, a shift-click from it or onto it, or a key.
+            let locked = ModSlotState {
+                may_pickup: false,
+                may_place: false,
+                shown: true,
+            };
+            menu.carried = None;
+            menu.put(env, 1, stack("iron_ingot", 2));
+            menu.set_mod_slot_states(vec![ModSlotState::default(), locked]);
+            menu.click(env, 1, 0, Input::Pickup).unwrap();
+            menu.click(env, 1, 0, Input::QuickMove).unwrap();
+            menu.click(env, 1, 2, Input::Swap).unwrap();
+            assert_eq!((n(menu.slot(1)), n(menu.carried.as_ref())), (Some(2), None));
+            menu.click(env, 31, 0, Input::QuickMove).unwrap();
+            assert_eq!(n(menu.slot(1)), Some(2), "no top-up from the inventory");
+            menu.carried = stack("iron_ingot", 1);
+            menu.click(env, 1, 0, Input::Pickup).unwrap();
+            assert_eq!((n(menu.slot(1)), n(menu.carried.as_ref())), (Some(2), Some(1)));
+            // One that is not shown takes no click at all; shown again, it does.
+            let gone = ModSlotState {
+                shown: false,
+                ..ModSlotState::default()
+            };
+            menu.set_mod_slot_states(vec![ModSlotState::default(), gone]);
+            menu.click(env, 1, 0, Input::Pickup).unwrap();
+            assert_eq!((n(menu.slot(1)), n(menu.carried.as_ref())), (Some(2), Some(1)));
+            menu.set_mod_slot_states(Vec::new());
+            menu.click(env, 1, 0, Input::Pickup).unwrap();
+            assert_eq!((n(menu.slot(1)), n(menu.carried.as_ref())), (Some(3), None));
         }
     }
 

@@ -1,7 +1,6 @@
 //! Every command horizon-ctl knows: its usage, help, examples and arguments.
 //! The same table prints `help`, checks `COMMAND --help` and describes the
 //! MCP tools, so the CLI and the MCP server always offer the same commands.
-use serde_json::{Map, Value, json};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ty {
@@ -586,9 +585,6 @@ pub const COMMANDS: &[Cmd] = &[
         "Lines are split like a shell (quotes keep spaces); # starts a comment; sleep SECONDS waits. Stops at the first error unless --keep-going. horizon-ctl - is the older form: read stdin and keep going.",
         ["horizon-ctl script play.txt", "printf 'state\\ngoto 0 64 0\\n' | horizon-ctl script"], &[], mcp: false, local: true),
     cmd!("sleep", Scripting, "sleep SECONDS", "wait (in scripts)", "", ["sleep 0.5"], &[], mcp: false, local: true),
-    cmd!("mcp", Scripting, "mcp [--paced]", "serve the Model Context Protocol on stdin/stdout, one tool per command",
-        "Add it to an MCP client as a stdio server: command horizon-ctl, args [\"mcp\"] (with --socket PATH first if needed). The screenshot tool returns the image. --paced stops a single-player world between tool calls: the pause menu opens after each action and closes before the next, so time passes only while an action (or wait) runs, not while the agent thinks; reading tools (state, inventory, entities, events...) leave it paused.",
-        ["horizon-ctl mcp", "horizon-ctl mcp --paced"], &[], mcp: false, local: true),
     cmd!("bench", Scripting, "bench SECONDS [raw]", "reset frame stats, wait, reply with the summary", "", ["horizon-ctl bench 10", "horizon-ctl bench 4 raw"], &[p("seconds", Ty::Num, "how long to measure"), opt("raw", Ty::Bool, "every frame time too (frame_ms, cpu_ms, gpu_ms; alloc_count and alloc_bytes in an alloc-count build)")], mcp: true, local: false),
     cmd!("stats", Scripting, "stats [reset] [raw]", "frame-time summary since the last reset", "A build with the alloc-count feature adds alloc: the window thread's allocations and KiB per frame and all threads' allocations per second, else null.", ["horizon-ctl stats"], &[opt("reset", Ty::Bool, "start counting again"), opt("raw", Ty::Bool, "every frame time too (frame_ms, cpu_ms, gpu_ms; alloc_count and alloc_bytes in an alloc-count build)")], mcp: true, local: false),
     cmd!("gpu-passes", Scripting, "gpu-passes [on|off|detail]", "time Horizon's own render passes on the GPU, shown in F3 and in stats and bench; detail adds dispatch times and, on Vulkan, fragment and vertex counts per world pass", "", ["horizon-ctl gpu-passes on"], &[opt("mode", Ty::Enum(&["on", "off", "detail"]), "on, off or detail; without it, only reports")], mcp: false, local: false),
@@ -691,33 +687,7 @@ pub fn detail(c: &Cmd) -> String {
     out
 }
 
-/// The commands whose replies are described so far, one group at a time: the test
-/// requires each to name its fields.
-#[cfg(test)]
-pub const REPLY_GROUP: &[&str] = &["hello", "status"];
 
-/// The JSON schema of a command's reply, or none while its reply is undescribed.
-pub fn reply_schema(c: &Cmd) -> Option<Value> {
-    if c.reply.is_empty() {
-        return None;
-    }
-    let mut props = Map::new();
-    let mut required = Vec::new();
-    for fld in c.reply {
-        let types: Vec<&str> = fld.ty.split('|').collect();
-        let ty = if types.len() == 1 {
-            json!(types[0])
-        } else {
-            json!(types)
-        };
-        props.insert(
-            fld.name.to_owned(),
-            json!({ "type": ty, "description": fld.help }),
-        );
-        required.push(fld.name);
-    }
-    Some(json!({ "type": "object", "properties": props, "required": required }))
-}
 
 /// The generated reference, docs/horizon-ctl-commands.md (`horizon-ctl help --markdown`).
 pub fn markdown() -> String {
@@ -840,116 +810,8 @@ pub fn tool_name(c: &Cmd) -> String {
     c.name.replace('-', "_")
 }
 
-/// The JSON schema of a command's arguments.
-pub fn schema(c: &Cmd) -> Value {
-    let mut props = Map::new();
-    let mut required = Vec::new();
-    for p in c.params {
-        let mut s = match p.ty {
-            Ty::Int => json!({ "type": "integer" }),
-            Ty::Num => json!({ "type": "number" }),
-            Ty::Str | Ty::Rest => json!({ "type": "string" }),
-            Ty::Bool => json!({ "type": "boolean" }),
-            Ty::Enum(values) => json!({ "type": "string", "enum": values }),
-        };
-        s["description"] = json!(p.help);
-        props.insert(p.name.to_owned(), s);
-        if p.required {
-            required.push(p.name);
-        }
-    }
-    json!({ "type": "object", "properties": props, "required": required })
-}
 
-/// The command line for an MCP call's arguments: positional values in order,
-/// then `--flag value` options.
-pub fn line_for(c: &Cmd, args: &Value) -> Result<Vec<String>, String> {
-    let mut words: Vec<String> = c
-        .wire
-        .unwrap_or(c.name)
-        .split(' ')
-        .map(str::to_owned)
-        .collect();
-    let mut flags = Vec::new();
-    let mut gap: Option<&str> = None;
-    let mut rest: Option<String> = None;
-    for p in c.params {
-        let value = args.get(p.name).filter(|v| !v.is_null());
-        let text = match value {
-            None => {
-                if p.required {
-                    return Err(format!("{} is required", p.name));
-                }
-                if !p.flag {
-                    gap.get_or_insert(p.name);
-                }
-                continue;
-            }
-            Some(Value::Bool(b)) => {
-                if p.ty != Ty::Bool {
-                    return Err(format!("{} must be a {}", p.name, ty_name(p.ty)));
-                }
-                if *b {
-                    if p.flag {
-                        flags.push(format!("--{}", p.name));
-                    } else {
-                        words.push(p.name.to_owned());
-                    }
-                }
-                continue;
-            }
-            Some(Value::String(s)) => s.clone(),
-            Some(Value::Number(n)) => n.to_string(),
-            Some(other) => {
-                return Err(format!(
-                    "{} must be a {}, not {other}",
-                    p.name,
-                    ty_name(p.ty)
-                ));
-            }
-        };
-        match p.ty {
-            Ty::Int if text.parse::<i64>().is_err() => {
-                return Err(format!("{} must be an integer, not {text}", p.name));
-            }
-            Ty::Num if text.parse::<f64>().is_err() => {
-                return Err(format!("{} must be a number, not {text}", p.name));
-            }
-            Ty::Enum(values) if !values.contains(&text.as_str()) => {
-                return Err(format!("{} must be one of {values:?}, not {text}", p.name));
-            }
-            _ => {}
-        }
-        if p.flag {
-            flags.push(format!("--{}", p.name));
-            flags.push(text);
-        } else {
-            if let Some(missing) = gap {
-                return Err(format!("{} needs {missing} to be given too", p.name));
-            }
-            if p.ty == Ty::Rest {
-                rest = Some(text);
-            } else if text.contains(char::is_whitespace) || text.is_empty() {
-                return Err(format!("{} must be a single word", p.name));
-            } else {
-                words.push(text);
-            }
-        }
-    }
-    // Options go before free text, which runs to the end of the line.
-    words.extend(flags);
-    words.extend(rest);
-    Ok(words)
-}
 
-fn ty_name(ty: Ty) -> &'static str {
-    match ty {
-        Ty::Int => "integer",
-        Ty::Num => "number",
-        Ty::Bool => "boolean",
-        _ => "string",
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -973,122 +835,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn mcp_arguments_become_command_lines() {
-        let goto = find("goto").unwrap();
-        let words = line_for(
-            goto,
-            &json!({ "x": 1.5, "y": 64, "z": -3, "near": 2, "sprint": true }),
-        )
-        .unwrap();
-        assert_eq!(
-            words,
-            ["goto", "1.5", "64", "-3", "--near", "2", "--sprint"]
-        );
-        assert!(
-            line_for(goto, &json!({ "x": 1, "y": 2 }))
-                .unwrap_err()
-                .contains("z is required")
-        );
-        assert!(line_for(goto, &json!({ "x": "a", "y": 2, "z": 3 })).is_err());
-        let block = find("look-at-block").unwrap();
-        assert_eq!(
-            line_for(block, &json!({ "x": 1, "y": 2, "z": 3, "face": "up" })).unwrap(),
-            ["look-at", "block", "1", "2", "3", "up"]
-        );
-        assert!(
-            line_for(
-                block,
-                &json!({ "x": 1, "y": 2, "z": 3, "face": "sideways" })
-            )
-            .is_err()
-        );
-        let turn = find("turn").unwrap();
-        assert_eq!(
-            line_for(turn, &json!({ "dyaw": -90, "dpitch": 10.5, "over": 0.5 })).unwrap(),
-            ["turn", "-90", "10.5", "--over", "0.5"]
-        );
-        let mouse = find("mouse-move").unwrap();
-        assert_eq!(tool_name(mouse), "mouse_move");
-        assert_eq!(
-            line_for(mouse, &json!({ "dx": -25, "dy": 40 })).unwrap(),
-            ["mouse-move", "-25", "40"]
-        );
-        assert_eq!(
-            line_for(block, &json!({ "x": 1, "y": 2, "z": 3, "over": 0.3 })).unwrap(),
-            ["look-at", "block", "1", "2", "3", "--over", "0.3"]
-        );
-        let button = find("click-button").unwrap();
-        assert_eq!(
-            line_for(button, &json!({ "label": "Create New World" })).unwrap(),
-            ["click-button", "Create New World"]
-        );
-        let slot = find("click-slot").unwrap();
-        assert_eq!(
-            line_for(slot, &json!({ "slot": 200, "shift": true })).unwrap(),
-            ["click-slot", "200", "shift"]
-        );
-        let open = find("open").unwrap();
-        assert!(
-            line_for(open, &json!({ "world": "A", "mode": "creative" }))
-                .unwrap_err()
-                .contains("seed")
-        );
-    }
 
-    #[test]
-    fn schemas_list_required_parameters() {
-        let s = schema(find("break").unwrap());
-        assert_eq!(s["required"], json!(["x", "y", "z"]));
-        assert_eq!(s["properties"]["timeout"]["type"], "number");
-        assert_eq!(tool_name(find("look-at-entity").unwrap()), "look_at_entity");
-    }
 
-    #[test]
-    fn every_command_in_the_reply_group_names_its_reply_fields() {
-        for name in REPLY_GROUP {
-            let c = find(name).unwrap_or_else(|| panic!("{name} is not a command"));
-            assert!(!c.reply.is_empty(), "{name} names no reply fields");
-            let mut seen = std::collections::HashSet::new();
-            for fld in c.reply {
-                assert!(seen.insert(fld.name), "{name}: {} twice", fld.name);
-                assert!(!fld.help.is_empty(), "{name}.{} has no meaning", fld.name);
-                for t in fld.ty.split('|') {
-                    assert!(
-                        [
-                            "string", "integer", "number", "boolean", "array", "object", "null"
-                        ]
-                        .contains(&t),
-                        "{name}.{}: unknown type {t}",
-                        fld.name
-                    );
-                }
-            }
-            assert_eq!(
-                reply_schema(c).unwrap()["required"]
-                    .as_array()
-                    .unwrap()
-                    .len(),
-                c.reply.len()
-            );
-        }
-        // Nothing outside the group claims a reply the group list does not cover.
-        for c in COMMANDS.iter().filter(|c| !c.reply.is_empty()) {
-            assert!(
-                REPLY_GROUP.contains(&c.name),
-                "{} has fields but is not in REPLY_GROUP",
-                c.name
-            );
-        }
-        assert_eq!(
-            reply_schema(find("hello").unwrap()).unwrap()["properties"]["features"]["type"],
-            "array"
-        );
-        assert_eq!(
-            reply_schema(find("status").unwrap()).unwrap()["properties"]["player"]["type"],
-            json!(["object", "null"])
-        );
-    }
 
     #[test]
     fn the_generated_reference_is_up_to_date() {
@@ -1110,22 +858,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn destructive_and_network_tools_exist() {
-        for name in DESTRUCTIVE.iter().chain(OPEN_WORLD) {
-            assert!(find(name).is_some_and(|c| c.mcp), "{name}");
-        }
-        let delete = find("world-delete").unwrap();
-        assert_eq!(
-            line_for(delete, &json!({ "folder": "A", "confirm": true })).unwrap(),
-            ["world-delete", "A", "--confirm"]
-        );
-        let lan = find("lan").unwrap();
-        assert_eq!(
-            line_for(lan, &json!({ "action": "open", "commands": true })).unwrap(),
-            ["lan", "open", "commands"]
-        );
-    }
 
     #[test]
     fn help_mentions_every_command() {

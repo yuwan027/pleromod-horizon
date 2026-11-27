@@ -508,6 +508,10 @@ impl Game<'_> {
             } else {
                 horizon_client::cit::Hand::Main
             };
+            // A mod's own renderer for the item draws in its model's place.
+            if self.item_drawn_by_mod(&stack, context, alpha as f32, t, light, out) {
+                continue;
+            }
             let state = self.resolve_item_in_hand(&stack, context, Some(&owner), seed, hand);
             if lit
                 && let Some(skinned) = skin.as_deref_mut()

@@ -1,0 +1,23 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "play_sound_loop",
+      "target": "horizon_client::game::native_sound_loops::Game<'_>::native_play_sound_loop"
+    },
+    {
+      "name": "stop_sound_loop",
+      "target": "horizon_client::game::native_sound_loops::Game<'_>::native_stop_sound_loop"
+    },
+    {
+      "name": "sound_loop_active",
+      "target": "horizon_client::game::native_sound_loops::Game<'_>::native_sound_loop_active"
+    },
+    {
+      "name": "nearby_mod_block_entities",
+      "target": "horizon_client::game::native_sound_loops::Game<'_>::native_nearby_mod_block_entities"
+    }
+  ],
+  "rust_summary": "a looping sound a client mod keeps playing at a place (`native_play_sound_loop`, `native_stop_sound_loop`, `native_sound_loop_active`). The mod block entities a client has near its player (`native_nearby_mod_block_entities`).",
+  "doc_summary": "`native_play_sound_loop(sound, at, source, volume, pitch)` starts a looping sound at a place for this player and answers a handle; `native_stop_sound_loop` ends it and `native_sound_loop_active` says whether it still plays. `native_nearby_mod_block_entities(radius)` lists where the mod block entities near this client's player are, for what a client-side block entity ticker does."
+}

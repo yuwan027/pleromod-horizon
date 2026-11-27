@@ -1227,6 +1227,29 @@ impl Behaviours {
             sim.update_neighbour_for_output_signal(pos, block);
         }
     }
+    /// One block update for a block a world was put together without (blocks written straight
+    /// into its chunks, as Horizon's shared worlds put others' changes in): the block adjusted
+    /// to its neighbours (a door left above nothing goes), its neighbours' shapes adjusted to it
+    /// (a torch left without its wall goes), then the block and its neighbours told, so fluids
+    /// flow and redstone powers as the world now is.
+    pub fn settle_block<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+    ) {
+        let mut sim = self.sim(level, ticks);
+        let state = sim.state(pos);
+        let shaped = sim.update_from_neighbour_shapes(state, pos);
+        if shaped != state {
+            sim.set_block(pos, shaped, flags::UPDATE_ALL);
+        }
+        let state = sim.state(pos);
+        sim.update_neighbour_shapes(state, pos, flags::UPDATE_ALL, flags::UPDATE_LIMIT);
+        let block = sim.block_of(state);
+        sim.neighbor_changed(state, pos, block, false);
+        sim.update_neighbors_at(pos, block);
+    }
     /// `ShulkerBoxBlockEntity.doNeighborUpdates`: the box's collision shape
     /// changes with its lid, so the neighbours' shapes are updated (flag 3)
     /// and then their `neighborChanged` runs, at the four points in `tick`

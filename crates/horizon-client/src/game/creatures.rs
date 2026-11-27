@@ -1929,8 +1929,12 @@ impl Game<'_> {
                 for event in std::mem::take(&mut t.outbox) {
                     match event {
                         MobEvent::Sound(s, _, volume, pitch) => {
-                            self.audio
-                                .play(&format!("minecraft:{s}"), Some(center), volume, pitch);
+                            self.audio.play(
+                                &horizon_client::mobs::sound_id(s),
+                                Some(center),
+                                volume,
+                                pitch,
+                            );
                         }
                         MobEvent::Infested { at, velocities } => infested.push((at, velocities)),
                         other => {
@@ -2241,8 +2245,12 @@ impl Game<'_> {
                     );
                 }
                 MobEvent::Sound(name, at, volume, pitch) => {
-                    self.audio
-                        .play(&format!("minecraft:{name}"), Some(at), volume, pitch)
+                    self.audio.play(
+                        &horizon_client::mobs::sound_id(name),
+                        Some(at),
+                        volume,
+                        pitch,
+                    )
                 }
                 MobEvent::LocalSound(name, at, volume, pitch) => {
                     // Level.playLocalSound: play locally without broadcasting.

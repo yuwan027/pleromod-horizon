@@ -394,6 +394,25 @@ impl Game<'_> {
     /// the guest's seed and the bookshelves around the table.
     fn lan_enchant_offers(&mut self, host: &LanHost, gi: usize, gs: &mut GuestStation) {
         let seed = host.hub.guests[gi].xp_seed;
+        // `native_enchant_offers`, where `slotsChanged` begins: a mod's offers are the menu's.
+        if let Some(made) = self.mod_enchant_offers(gs.pos, gs.menu.slot(0)) {
+            for i in 0..3 {
+                gs.menu.data[i] = made.costs[i];
+                let clue = made.clues[i].as_ref();
+                gs.menu.data[4 + i] = clue
+                    .and_then(|(e, _)| host.hub.registry_id("minecraft:enchantment", e))
+                    .unwrap_or(-1);
+                gs.menu.data[7 + i] = clue.map_or(-1, |(_, l)| *l as i32);
+            }
+            gs.menu.data[3] = seed;
+            return;
+        }
+        // An item vanilla makes no offer for: the menu cleared them.
+        if !gs.menu.slot(0).is_some_and(|s| {
+            horizon_client::stations::is_enchantable(&self.stations().enchantments, s)
+        }) {
+            return;
+        }
         let bookcases = self.count_bookshelves(gs.pos);
         let offers = horizon_client::stations::enchant_offers(
             &self.stations().enchantments,
@@ -532,6 +551,50 @@ impl Game<'_> {
         })
     }
 
+    /// `native_enchant_click` for a guest's enchanting table: true when a mod took the click
+    /// (whatever it answered), and vanilla's enchanting is left out. The stacks the mod left
+    /// are the menu's, and its offers are made again (`slotsChanged`).
+    fn lan_mod_enchant_click(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        window: i32,
+        id: i32,
+    ) -> bool {
+        let Some((uuid, name, creative)) = host
+            .hub
+            .guest(conn)
+            .filter(|g| !g.spectator())
+            .map(|g| (g.uuid, g.name.clone(), g.creative()))
+        else {
+            return false;
+        };
+        let Some((pos, mut slots)) = host
+            .play
+            .get(&conn)
+            .and_then(|p| p.station.as_ref())
+            .filter(|s| s.window == window)
+            .map(|s| (s.pos, [s.menu.slot(0).cloned(), s.menu.slot(1).cloned()]))
+        else {
+            return false;
+        };
+        let mut taken = None;
+        self.as_guest(host, conn, |game| {
+            game.native_enchant_click(uuid, &name, pos, id, creative, &mut slots, &mut taken);
+        });
+        let Some(done) = taken else {
+            return false;
+        };
+        if done {
+            let [item, lapis] = slots;
+            self.lan_station_op(host, conn, Some(window), |menu, env| {
+                menu.set_slot(env, 0, item.filter(|i| i.count > 0));
+                menu.set_slot(env, 1, lapis.filter(|l| l.count > 0));
+            });
+        }
+        true
+    }
+
     /// `ServerGamePacketListenerImpl.handleContainerButtonClick`:
     /// `clickMenuButton`, then `broadcastChanges` when the menu took it.
     pub(super) fn lan_station_button(
@@ -584,6 +647,12 @@ impl Game<'_> {
             .and_then(|p| p.station.as_ref())
             .filter(|s| s.window == window)
             .map(|s| s.kind);
+        // `native_enchant_click`, where `EnchantmentMenu.clickMenuButton` begins.
+        if kind == Some(StationKind::Enchanting)
+            && self.lan_mod_enchant_click(host, conn, window, id)
+        {
+            return;
+        }
         self.lan_station_op(host, conn, Some(window), |menu, env| {
             selected = menu.button(env, id);
         });

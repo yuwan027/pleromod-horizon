@@ -27,6 +27,8 @@ pub(super) fn set_up_surface(
     size: winit::dpi::PhysicalSize<u32>,
     keep_mode: Option<wgpu::PresentMode>,
     log_step: bool,
+    // The surface comes from a renderer on this device (`release_surface`).
+    handed_over: bool,
 ) -> std::result::Result<(wgpu::SurfaceConfiguration, wgpu::SurfaceCapabilities), String> {
     let max_side = device.limits().max_texture_dimension_2d;
     let mut config = surface
@@ -60,6 +62,15 @@ pub(super) fn set_up_surface(
             "device ready; configuring the surface ({}x{} {:?}, {:?})",
             config.width, config.height, config.format, config.present_mode
         ));
+    }
+    // Configuring a canvas clears it, and the page shows it blank until the
+    // next frame presents: one handed over as it is stays configured, so the
+    // last frame stays up while the new renderer builds and starts.
+    if cfg!(target_arch = "wasm32")
+        && handed_over
+        && surface.get_configuration().as_ref() == Some(&config)
+    {
+        return Ok((config, caps));
     }
     Renderer::configure(device, surface, &config, None, device_lost)?;
     Ok((config, caps))
@@ -190,17 +201,7 @@ pub(super) async fn open_adapter(
         experimental_features: ray_query::experimental(features),
         ..Default::default()
     };
-    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-    let opened = match info.backend {
-        wgpu::Backend::Vulkan => horizon_hdr::open_vulkan_device(adapter, &desc),
-        _ => None,
-    };
-    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-    let opened = None;
-    let opened = match opened {
-        Some(opened) => opened,
-        None => adapter.request_device(&desc).await,
-    };
+    let opened = adapter.request_device(&desc).await;
     let (device, queue) = match opened {
         Ok(opened) => opened,
         Err(e) => return Err(AdapterFailure::Failed(format!("{name} device: {e}"))),
@@ -226,6 +227,7 @@ pub(super) async fn open_adapter(
                 window.inner_size(),
                 None,
                 true,
+                false,
             )
             .map_err(AdapterFailure::CannotPresent)?,
         ),

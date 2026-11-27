@@ -1,14 +1,12 @@
 [workspace]
-exclude = ["launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
+exclude = ["launcher", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
 members = [
     "crates/horizon-addresses",
     "crates/horizon-core",
     "crates/horizon-os",
     "crates/horizon-ureq-web",
-    "crates/horizon-dualsense",
     "crates/horizon-narrator",
     "crates/horizon-threads",
-    "crates/horizon-hdr",
     "crates/horizon-world",
     "crates/horizon-client",
     "crates/horizon-client-lib",
@@ -20,11 +18,8 @@ members = [
     "crates/horizon-items",
     "crates/horizon-server-files",
     "crates/horizon-anticheat",
-    "crates/horizon-chat-filter",
-    # The Model Context Protocol, shared by horizon-ctl, horizon-server and the launcher.
+    # The Model Context Protocol, shared by horizon-ctl and the launcher.
     "crates/horizon-mcp",
-    "crates/horizon-server",
-    "crates/horizon-bots",
     "crates/horizon-assets",
     "crates/horizon-protocol",
     "crates/horizon-theme",
@@ -34,16 +29,9 @@ members = [
     "crates/horizon-platform",
     "crates/horizon-hooks",
     "crates/horizon-game",
-    "crates/horizon-official",
-    "crates/horizon-heartbeat",
-    "crates/horizon-discord",
-    "crates/horizon-official-servers",
     "crates/horizon-bench",
     "crates/horizon-perf-format",
-    "crates/horizon-perf",
-    "crates/horizon-perf-share",
     "crates/horizon-friends",
-    "crates/horizon-relay",
     "crates/horizon-mods",
     "crates/horizon-mod-api-gen",
     "crates/horizon-mod-api-gen/dispatch-tests",
@@ -56,6 +44,9 @@ members = [
     "crates/horizon-release-sign",
     "crates/horizon-mod-deps",
     "xtask",
+    # Native mods built into the browser game (web/build.sh) and the game that links them.
+    "mods/plerocottage/engine",
+    "web/game",
 ]
 resolver = "2"
 

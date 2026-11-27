@@ -487,7 +487,6 @@ impl Game<'_> {
         options.dedicated = Some(Vec::new());
         options.execution_role = ExecutionRole::IntegratedServer;
         options.control = None;
-        options.benchmark = None;
         options.frames = None;
         options.world_frames = None;
         options.report = None;
@@ -859,6 +858,7 @@ impl Game<'_> {
             }
             self.apply_publish();
             self.publish_load_view();
+            self.play_server_tick();
             self.wait_for_next_server_tick(&mut next, paused);
         }
         if failure.is_none() {

@@ -467,7 +467,6 @@ impl Game<'_> {
         match self.screen {
             Screen::Playing => "playing",
             Screen::GameModeSwitcher => "gamemode-switcher",
-            Screen::EmoteWheel => "emote-wheel",
             Screen::Paused => "paused",
             Screen::Options => "options",
             Screen::Inventory if self.station.is_some() => "station",
@@ -730,7 +729,6 @@ impl Game<'_> {
                 json!({ "mode": "multiplayer", "disconnected": reason })
             }
             Mode::Multiplayer(_) => json!({ "mode": "multiplayer" }),
-            Mode::Realms(_) => json!({ "mode": "realms" }),
             Mode::MultiplayerWarning { check } => {
                 json!({ "mode": "multiplayer-warning", "check": check })
             }

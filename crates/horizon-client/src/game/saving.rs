@@ -278,7 +278,7 @@ impl Game<'_> {
         horizon_client::level_loading::draw_progress(
             &mut hud,
             &self.gui.atlas,
-            "Saving world...",
+            &horizon_client::lang::get_or("menu.savingLevel", "Saving world"),
             progress,
         );
         renderer.render(&loading_frame(&hud))?;

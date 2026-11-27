@@ -8,6 +8,7 @@ mod display;
 mod effects;
 mod enchanting;
 mod flatten;
+mod frond;
 mod gecko;
 mod glue;
 mod growth;
@@ -524,6 +525,9 @@ impl Hooks for Plerocottage {
         if host.block(event.pos) == machines::cutting_board::BLOCK
             && glue::use_board(host, event.pos, matches!(event.hand, Hand::Main))
         {
+            return Flow::Cancel;
+        }
+        if host.block(event.pos) == frond::BLOCK && frond::used(host, event.pos, matches!(event.hand, Hand::Main)) {
             return Flow::Cancel;
         }
         if mobs::use_held(host, event.pos, matches!(event.hand, Hand::Main)) {

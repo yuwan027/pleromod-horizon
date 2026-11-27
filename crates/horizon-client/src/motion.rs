@@ -3040,6 +3040,63 @@ mod tests {
 
     use super::*;
 
+    /// The browser's play mode (pleromod.com/play) collides with the content root its game lays
+    /// over the prepared resources for the mods of web/mods, as a native game with those mods
+    /// does: a player dropped on a slab, a fence, grass and one of the mod's small blocks stands
+    /// on their real shapes, not on full cubes.
+    #[test]
+    fn the_play_modes_content_root_collides_with_real_shapes() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/mods/plerocottage");
+        if !base.join("movement-properties.nbt").exists() || !dir.join("horizon-mod.toml").exists()
+        {
+            return; // CI has neither the vanilla data nor the mod.
+        }
+        let package = horizon_mods::Package::read(&dir).unwrap();
+        let content_mod = crate::mod_content::ContentMod {
+            id: package.manifest.id.clone(),
+            content: horizon_mods::content::Content::read(&dir, &package.manifest).unwrap(),
+        };
+        let cache = std::env::temp_dir().join("horizon-play-collision-test");
+        let root = crate::mod_content::resource_root(&base, &[content_mod], &cache).unwrap();
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 2).unwrap();
+        // The test scene's ground is four blocks deep: its top is y = 4.
+        let cases = [
+            ("minecraft:oak_slab", 20, 4.5),
+            ("minecraft:short_grass", 24, 4.0),
+            ("minecraft:oak_fence", 28, 5.5),
+            ("plerocottage:absinthe", 32, 4.8125),
+        ];
+        for (name, x, _) in cases {
+            let state = assets.registry.default_state(name).unwrap();
+            scene.set(x, 4, 20, state).unwrap();
+        }
+        for (name, x, top) in cases {
+            let at = Vec3::new(f64::from(x) + 0.5, 7.0, 20.5);
+            let mut player = PlayerMotion::new(&resources, at).unwrap();
+            for _ in 0..40 {
+                MotionWorld {
+                    entities: &[],
+                    player: &mut player,
+                    scene: &mut scene,
+                    assets: &assets,
+                    collision_binding: &binding,
+                    resources: &resources,
+                    health: &resources.health,
+                }
+                .controlled_simulation_tick(Default::default())
+                .unwrap();
+            }
+            assert_eq!(player.position.y, top, "{name}");
+        }
+    }
+
     /// `LocalPlayer.isHorizontalCollisionMinor`: sliding along a wall at a
     /// small angle to the input is minor; a sideways slide is not.
     #[test]

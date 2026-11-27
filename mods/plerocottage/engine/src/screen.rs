@@ -32,7 +32,7 @@ impl<'a> Seen<'a> {
         let tank = nbt.and_then(crate::glue::tank_of);
         Self {
             data,
-            stacks: STACKS.lock().map(|s| s.clone()).unwrap_or_default(),
+            stacks: horizon_os::sync::lock(&STACKS).map(|s| s.clone()).unwrap_or_default(),
             heat: pos.is_some_and(|p| crate::glue::heated(host, spec, p)),
             light: pos.map_or(0, |p| {
                 let (block, sky) = host.light(p);
@@ -40,7 +40,7 @@ impl<'a> Seen<'a> {
             }),
             running: nbt.is_some_and(|n| crate::int(n, "isRunning") != 0),
             tank: tank.map(|(fluid, amount)| (fluid, i64::from(amount))),
-            toggles: TOGGLES.lock().ok().and_then(|t| t.clone()).unwrap_or_default(),
+            toggles: horizon_os::sync::lock(&TOGGLES).ok().and_then(|t| t.clone()).unwrap_or_default(),
         }
     }
 
@@ -226,7 +226,7 @@ pub fn click(screen: &Screen2, seen: &Seen<'_>, at: [f32; 2]) -> Option<i32> {
         if !pressed.active {
             continue;
         }
-        if let Ok(mut toggles) = TOGGLES.lock() {
+        if let Ok(mut toggles) = horizon_os::sync::lock(&TOGGLES) {
             let set = toggles.get_or_insert_with(HashSet::new);
             for name in &pressed.toggles {
                 if !set.remove(name) {

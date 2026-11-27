@@ -100,7 +100,7 @@ impl Plot for Level<'_> {
         }
     }
     fn drop(&mut self, at: [i32; 3], item: &str, count: u32) {
-        if let Ok(mut drops) = DROPS.lock() {
+        if let Ok(mut drops) = horizon_os::sync::lock(&DROPS) {
             drops.push((at, item.to_owned(), count));
         }
     }
@@ -188,7 +188,7 @@ fn item_entity(host: &mut dyn Host, pos: [i32; 3], item: &str, count: u32) {
 
 /// Puts what random ticks dropped into the world.
 pub fn flush_drops(host: &mut dyn Host) {
-    let drops = DROPS.lock().map(|mut drops| std::mem::take(&mut *drops)).unwrap_or_default();
+    let drops = horizon_os::sync::lock(&DROPS).map(|mut drops| std::mem::take(&mut *drops)).unwrap_or_default();
     for (pos, item, count) in drops {
         item_entity(host, pos, &item, count);
     }

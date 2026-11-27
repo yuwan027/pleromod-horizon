@@ -8,6 +8,8 @@ publish = false
 # and the runs of the mod's machines its tests compare with (output/machines.json).
 [dependencies]
 horizon-client = { path = "../../../crates/horizon-client", default-features = false }
+# Its locks on the page's thread spin instead of waiting, which the browser refuses there (sync::lock).
+horizon-os = { path = "../../../crates/horizon-os" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

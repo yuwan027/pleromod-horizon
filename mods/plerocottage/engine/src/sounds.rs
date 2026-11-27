@@ -32,7 +32,7 @@ fn running(host: &dyn Host, pos: [i32; 3]) -> Option<&'static SoundLoop> {
 
 /// A client tick: what each machine's `clientTick` and each loop's own `tick` do.
 pub fn tick(host: &mut dyn Host) {
-    let Ok(mut playing) = PLAYING.lock() else {
+    let Ok(mut playing) = horizon_os::sync::lock(&PLAYING) else {
         return;
     };
     let playing = playing.get_or_insert_with(HashMap::new);

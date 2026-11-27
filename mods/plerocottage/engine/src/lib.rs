@@ -734,7 +734,7 @@ impl Hooks for Plerocottage {
     fn client_tick_post(&self, host: &mut dyn Host, _event: &mut ClientTickPostEvent) {
         let output = oven::output_slot(spec::oven());
         let stacks = host.menu_stacks();
-        if let Ok(mut seen) = screen::STACKS.lock() {
+        if let Ok(mut seen) = horizon_os::sync::lock(&screen::STACKS) {
             *seen = stacks
                 .iter()
                 .flatten()
@@ -743,7 +743,7 @@ impl Hooks for Plerocottage {
         }
         if stacks.is_none() {
             // No menu is open: the next screen starts with its switches as a new screen has them.
-            if let Ok(mut toggles) = screen::TOGGLES.lock() {
+            if let Ok(mut toggles) = horizon_os::sync::lock(&screen::TOGGLES) {
                 *toggles = None;
             }
         }

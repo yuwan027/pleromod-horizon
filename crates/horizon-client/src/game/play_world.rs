@@ -242,7 +242,7 @@ static SHARED: LazyLock<Mutex<Shared>> = LazyLock::new(Default::default);
 
 /// The shared state, on the server thread (which may wait for it).
 fn shared() -> MutexGuard<'static, Shared> {
-    SHARED.lock().unwrap_or_else(|e| e.into_inner())
+    horizon_os::sync::lock(&SHARED).unwrap_or_else(|e| e.into_inner())
 }
 
 /// The shared state on the page's own thread, which the browser forbids to block: `None`
@@ -405,7 +405,7 @@ struct ServerPlay {
 static SERVER: LazyLock<Mutex<ServerPlay>> = LazyLock::new(Default::default);
 
 fn server() -> MutexGuard<'static, ServerPlay> {
-    SERVER.lock().unwrap_or_else(|e| e.into_inner())
+    horizon_os::sync::lock(&SERVER).unwrap_or_else(|e| e.into_inner())
 }
 
 /// What a player's packet may change, taken before it is handled.
@@ -1294,7 +1294,7 @@ mod net {
 
     /// The window's part, between frames: joining, the batches, the changes, the saves.
     pub(super) fn pump() {
-        let mut net = NET.lock().unwrap_or_else(|e| e.into_inner());
+        let mut net = horizon_os::sync::lock(&NET).unwrap_or_else(|e| e.into_inner());
         let Some(mut s) = shared_now() else {
             return;
         };

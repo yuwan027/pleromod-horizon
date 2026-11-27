@@ -12801,11 +12801,8 @@ impl Game<'_> {
     /// frame (`native_recipe_lookup`), so a screen hook may ask; with no
     /// viewer installed nothing happens. Client-side. API 613.
     pub(super) fn native_show_recipes(&self, stack: NativeStack, lookup: NativeRecipeLookup) {
-        let mut lookups = self
-            .recipe_tables
-            .lookups
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut lookups =
+            horizon_os::sync::lock(&self.recipe_tables.lookups).unwrap_or_else(|e| e.into_inner());
         // A burst of asks (a held key) keeps the newest few.
         if lookups.len() >= 16 {
             lookups.remove(0);

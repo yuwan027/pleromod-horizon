@@ -53,7 +53,7 @@ struct State {
 
 fn state() -> MutexGuard<'static, State> {
     static STATE: OnceLock<Mutex<State>> = OnceLock::new();
-    STATE.get_or_init(Mutex::default).lock().unwrap_or_else(|e| e.into_inner())
+    horizon_os::sync::lock(STATE.get_or_init(Mutex::default)).unwrap_or_else(|e| e.into_inner())
 }
 
 impl Flattened {

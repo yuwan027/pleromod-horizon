@@ -105,7 +105,7 @@ fn files() -> &'static Mutex<Files> {
 
 /// Forgets what was read: the resource packs changed.
 pub fn reloaded() {
-    if let Ok(mut files) = files().lock() {
+    if let Ok(mut files) = horizon_os::sync::lock(files()) {
         *files = Files::default();
     }
 }
@@ -116,7 +116,7 @@ fn read(host: &dyn Host, folder: &str, name: &str, ending: &str) -> Option<serde
 }
 
 pub(crate) fn geometry(host: &dyn Host, name: &str) -> Option<Arc<Geometry>> {
-    let mut files = files().lock().ok()?;
+    let mut files = horizon_os::sync::lock(files()).ok()?;
     if let Some(found) = files.geometry.get(name) {
         return found.clone();
     }
@@ -128,7 +128,7 @@ pub(crate) fn geometry(host: &dyn Host, name: &str) -> Option<Arc<Geometry>> {
 }
 
 fn animations(host: &dyn Host, name: &str) -> Arc<HashMap<String, Animation>> {
-    let Ok(mut files) = files().lock() else {
+    let Ok(mut files) = horizon_os::sync::lock(files()) else {
         return Arc::default();
     };
     if let Some(found) = files.animations.get(name) {
@@ -216,7 +216,7 @@ pub fn draw_block(host: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
         && let Some(file) = &drawn.animation
     {
         let known = animations(host, file);
-        let Ok(mut all) = blocks().lock() else {
+        let Ok(mut all) = horizon_os::sync::lock(blocks()) else {
             return;
         };
         let now = event.draw.game_time;
@@ -330,7 +330,7 @@ pub fn draw_mob(host: &dyn Host, event: &mut MobSubmitEvent<'_>) -> bool {
     };
     let known = drawn.animation.as_deref().map(|file| animations(host, file));
     let mut whole = Pose::default();
-    if let (Some(known), Ok(mut all)) = (known, mobs().lock()) {
+    if let (Some(known), Ok(mut all)) = (known, horizon_os::sync::lock(mobs())) {
         if all.len() > 1024 {
             all.retain(|_, m| (mob.age - m.used).abs() < 600.0);
         }

@@ -105,7 +105,7 @@ pub fn clicked(host: &mut dyn Host, event: &InventoryClickEvent<'_>) -> bool {
     }
     // The server's players are out of reach while the click is heard: the click is refused, and what it does
     // is done in the level's next tick (`apply`), whose sync shows it.
-    if let Ok(mut pending) = PENDING.lock() {
+    if let Ok(mut pending) = horizon_os::sync::lock(&PENDING) {
         pending.push(Pending { player: event.player, slot, under, new_under, carried, new_carried });
     }
     true
@@ -125,7 +125,7 @@ static PENDING: std::sync::Mutex<Vec<Pending>> = std::sync::Mutex::new(Vec::new(
 
 /// The clicks the shaker took (`clicked`): each slot and cursor as it says, when they still hold what they held.
 pub fn apply(host: &mut dyn Host) {
-    let taken = PENDING.lock().map(|mut pending| std::mem::take(&mut *pending)).unwrap_or_default();
+    let taken = horizon_os::sync::lock(&PENDING).map(|mut pending| std::mem::take(&mut *pending)).unwrap_or_default();
     for click in taken {
         let player = click.player;
         if host.set_inventory_slot(player, NativeInventoryKind::Player, click.slot, click.under.as_ref(), click.new_under).is_ok() {

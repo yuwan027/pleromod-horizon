@@ -3279,6 +3279,7 @@ name = "plerocottage-native"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-os",
  "serde",
  "serde_json",
 ]

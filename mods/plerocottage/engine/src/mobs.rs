@@ -702,7 +702,7 @@ enum Op {
 static OPS: Mutex<Vec<Op>> = Mutex::new(Vec::new());
 
 fn queue(op: Op) {
-    if let Ok(mut ops) = OPS.lock() {
+    if let Ok(mut ops) = horizon_os::sync::lock(&OPS) {
         ops.push(op);
     }
 }
@@ -743,7 +743,7 @@ fn item_entity(host: &mut dyn Host, at: [f64; 3], stack: &ItemStack) {
 
 /// What the mobs of the level that just ticked did to nests.
 pub fn flush(host: &mut dyn Host, dimension: &str) {
-    let ops: Vec<Op> = match OPS.lock() {
+    let ops: Vec<Op> = match horizon_os::sync::lock(&OPS) {
         Ok(mut ops) => {
             let (mine, rest) = std::mem::take(&mut *ops).into_iter().partition(|op| match op {
                 Op::Lay { level, .. } | Op::Leave { level, .. } => *level == dimension,

@@ -1083,8 +1083,8 @@
   "horizon.play.price": "%s 银币 / %s 金币",
   "horizon.play.tooltip.place": "放置 %s",
   "horizon.play.tooltip.break": "破坏 %s",
-  "horizon.play.notice.title": "放置和破坏方块要花钱",
-  "horizon.play.notice.body": "在这个大家共享的世界里，放置和破坏方块要花银币，银币不够时花金币。每种方块的价格写在物品栏里它的提示中。",
+  "horizon.play.notice.title": "欢迎来到大家的世界",
+  "horizon.play.notice.body": "这个世界由大家一起搭建。放置或破坏方块会用到一点银币，银币用完时用金币，每种方块用多少写在物品栏里它的提示中。",
   "horizon.play.notice.ok": "知道了",
   "horizon.play.notice.never": "不再提示"
 }

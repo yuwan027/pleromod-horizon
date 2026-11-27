@@ -1273,8 +1273,8 @@
   "horizon.play.price": "%s silver / %s gold",
   "horizon.play.tooltip.place": "Place %s",
   "horizon.play.tooltip.break": "Break %s",
-  "horizon.play.notice.title": "Placing and breaking blocks costs coins",
-  "horizon.play.notice.body": "In this shared world, placing and breaking blocks costs silver coins, or gold coins when your silver runs short. Each block's prices are in its tooltip in the inventory.",
+  "horizon.play.notice.title": "Welcome to everyone's world",
+  "horizon.play.notice.body": "Everyone builds this world together. Placing or breaking a block uses a few silver coins, or gold coins once your silver runs out; each block's tooltip in the inventory says how many.",
   "horizon.play.notice.ok": "Got it",
   "horizon.play.notice.never": "Don't show again"
 }

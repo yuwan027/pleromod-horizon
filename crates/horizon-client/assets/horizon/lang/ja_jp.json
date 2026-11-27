@@ -1083,8 +1083,8 @@
   "horizon.play.price": "銀貨 %s 枚 / 金貨 %s 枚",
   "horizon.play.tooltip.place": "設置 %s",
   "horizon.play.tooltip.break": "破壊 %s",
-  "horizon.play.notice.title": "ブロックの設置と破壊にはコインがかかります",
-  "horizon.play.notice.body": "このみんなの世界では、ブロックを設置したり壊したりするたびに銀貨を払います。銀貨が足りないときは金貨で払います。各ブロックの値段はインベントリのツールチップに書いてあります。",
+  "horizon.play.notice.title": "みんなの世界へようこそ",
+  "horizon.play.notice.body": "この世界はみんなで作っています。ブロックの設置や破壊には銀貨を少し使い、銀貨がなくなったら金貨を使います。いくつ使うかはインベントリのツールチップに書いてあります。",
   "horizon.play.notice.ok": "わかった",
   "horizon.play.notice.never": "今後表示しない"
 }

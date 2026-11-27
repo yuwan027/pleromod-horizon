@@ -236,6 +236,10 @@ impl Game<'_> {
         }
         self.end_screenshot_sequence(Err("cancelled: the game is closing".into()));
         self.pad_close_output();
+        // In the browser the loop ends as the page goes (`pagehide`): a save then would hold the
+        // page's thread waiting on workers the browser is stopping, and the page took the files to
+        // keep before this ran, so nothing written now would last anyway.
+        #[cfg(not(target_arch = "wasm32"))]
         if let Err(e) = self.save_for_exit() {
             log::warn!("Horizon: failed to save the world on exit: {e}");
         }

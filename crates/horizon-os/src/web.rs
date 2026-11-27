@@ -99,6 +99,9 @@ export function horizon_recorder_start(fps, kbps, gameVolume, mic, micVolume, na
 export function horizon_utc_offset_ms() {
     return -new Date().getTimezoneOffset() * 60000;
 }
+export function horizon_site_dark() {
+    return !!globalThis.document?.documentElement.classList.contains("dark");
+}
 export function horizon_open_url(url) {
     window.open(url, "_blank", "noopener,noreferrer");
 }
@@ -227,6 +230,7 @@ extern "C" {
     fn horizon_download(name: &str, bytes: &[u8]);
     fn horizon_clipboard_image(png: &[u8]) -> bool;
     fn horizon_open_url(url: &str);
+    fn horizon_site_dark() -> bool;
     fn horizon_utc_offset_ms() -> f64;
     fn horizon_recorder_supported() -> bool;
     fn horizon_recorder_state() -> u32;
@@ -404,6 +408,12 @@ pub fn recorder_stop() {
 }
 
 /// Opens `url` in a new tab.
+/// Whether the site around the game is in its night look (`dark` on the page's root,
+/// set by its theme switch).
+pub fn site_dark() -> bool {
+    horizon_site_dark()
+}
+
 pub fn open_url(url: &str) {
     horizon_open_url(url);
 }

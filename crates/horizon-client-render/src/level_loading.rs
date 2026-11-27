@@ -330,9 +330,17 @@ pub const LOGO_BACKGROUND_COLOR: u32 = opaque(0xEF323D);
 /// `LoadingOverlay.LOGO_BACKGROUND_COLOR_DARK` (black).
 pub const LOGO_BACKGROUND_COLOR_DARK: u32 = opaque(0x000000);
 
+/// In the browser the overlay takes the site's colours instead: pink by day,
+/// lavender by night.
+pub const SITE_PINK: u32 = opaque(0xF08CAE);
+pub const SITE_LAVENDER: u32 = opaque(0x7A72B8);
+
 /// `LoadingOverlay.BRAND_BACKGROUND`: black when `darkMojangStudiosBackground` is set,
 /// Mojang red otherwise.
 pub fn brand_background(dark: bool) -> u32 {
+    if cfg!(target_arch = "wasm32") {
+        return if dark { SITE_LAVENDER } else { SITE_PINK };
+    }
     if dark {
         LOGO_BACKGROUND_COLOR_DARK
     } else {
@@ -426,6 +434,12 @@ pub fn draw_loading_overlay(
     progress: f32,
     dark: bool,
 ) {
+    // In the browser, by the site's day or night look rather than the option.
+    #[cfg(target_arch = "wasm32")]
+    let dark = {
+        let _ = dark;
+        horizon_os::web::site_dark()
+    };
     let (w, h) = (batch.width, batch.height);
     batch.fill(atlas, 0.0, 0.0, w, h, brand_background(dark));
     let (x, y, half_width, logo_height) = logo_layout(w, h);

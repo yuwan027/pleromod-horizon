@@ -2,11 +2,26 @@
 # Builds Horizon for the browser into web/dist: the game as WebAssembly, the
 # page, and the prepared resources packed for download.
 #
-#   web/build.sh            the release build: LTO, then wasm-opt (binaryen) when installed
-#   PROFILE=fast web/build.sh  optimized, no LTO or wasm-opt: quick to rebuild while working
-#   WASM_OPT=0 web/build.sh skip wasm-opt
-#   DIST=<folder> web/build.sh  build into another folder
-#   BUNDLE=0 web/build.sh   only the game and the page, not the resources
+#   web/build.sh            the release build, what is deployed: thin LTO, the crates in SMALL_CRATES
+#                           at opt-level "s", then wasm-opt -O2 (binaryen) when installed
+#   PROFILE=fast web/build.sh  optimized, no LTO or wasm-opt, incremental: quick to rebuild while
+#                           working (a larger, slower module with function names in its stacks)
+#   WASM_OPT=0|1            skip wasm-opt, or run it on another profile too (only release runs it)
+#   CONTENT_ROOT=0          no content root: the page's game builds its own at each start
+#   CONTENT_CACHE=0         build the content root again even when .local/web-cache has it
+#   DIST=<folder>           build into another folder (web/dist otherwise)
+#   BUNDLE=0                only the game and the page, not the resources
+#
+# Every mode serves the same files. It prints how long each phase took at the end.
+#
+# The content root (below) comes from a native build of the game, which recompiles much of
+# it after an engine change: it is kept in .local/web-cache/content/<key>, and reused while
+# the key is the same. The key covers the mods (web/mods), the prepared resources'
+# horizon-resources.json, the native mods built in, and the sources that build the root: the
+# crates horizon-mods, -items, -protocol, -world and -core, horizon-client's mod_content*,
+# content_identity, mod_api and game/{mods,native_hooks}.rs, the native mods' folders, web/game,
+# web/content_root.py, Cargo.toml and Cargo.lock. A change elsewhere that alters the root (code
+# those files call in another crate) needs CONTENT_CACHE=0.
 #
 # Threads are Web Workers on shared memory, which std only supports when it is
 # rebuilt with atomics: that build needs the pinned nightly below with its
@@ -16,6 +31,21 @@
 # the release build, wasm-opt (binaryen's package, e.g. pacman -S binaryen).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Each phase's time in whole seconds, printed when the build ends (or fails).
+timings=()
+phase_start=$SECONDS
+phase() {
+    timings+=("$(printf '  %-14s %4d s' "$1" $((SECONDS - phase_start)))")
+    phase_start=$SECONDS
+}
+report() {
+    [ ${#timings[@]} -gt 0 ] || return 0
+    echo "phases:"
+    printf '%s\n' "${timings[@]}"
+    printf '  %-14s %4d s\n' total "$SECONDS"
+}
+trap report EXIT
 
 profile="${PROFILE:-release}"
 resources="${HORIZON_RESOURCES:-.local/horizon-client/26.3}"
@@ -72,12 +102,19 @@ if [ "$profile" = release ]; then
 fi
 "${cargo[@]}" build --target wasm32-unknown-unknown --profile "$profile" \
     "${game[@]}" --bin horizon-client --no-default-features
+phase "wasm build"
 
+wasm_opt="${WASM_OPT:-$([ "$profile" = release ] && echo 1 || echo 0)}"
+if [ "$wasm_opt" != 0 ] && ! command -v wasm-opt > /dev/null; then
+    echo "wasm-opt not found: the module is left as rustc made it (install binaryen)" >&2
+    wasm_opt=0
+fi
 target_dir="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 mkdir -p "$dist/pkg"
 bindgen=(wasm-bindgen --target web --no-typescript --out-dir "$dist/pkg")
-# Function names (5 MB) only make stack traces readable: the release build drops them.
-[ "$profile" = release ] && bindgen+=(--remove-name-section)
+# Function names (5 MB) only make stack traces readable: the release build drops them. wasm-opt
+# drops them itself (it writes none without -g), after naming the functions in its symbol map.
+[ "$profile" = release ] && [ "$wasm_opt" = 0 ] && bindgen+=(--remove-name-section)
 "${bindgen[@]}" "$target_dir/wasm32-unknown-unknown/$profile/horizon-client.wasm"
 # The glue imports its snippets (`inline_js`) from folders named per crate, not
 # per content: ask for each by its hash, so a cache can't hand the page an
@@ -93,17 +130,19 @@ def stamp(m):
 # Only the import statements: the module's import object keeps the plain names.
 glue.write_text(re.sub(r"""(\bfrom\s*)(['"])(\./snippets/[^'"?]+\.js)\2""", stamp, glue.read_text()))
 PY
+phase "wasm-bindgen"
 wasm="$dist/pkg/horizon-client_bg.wasm"
-if [ "$profile" = release ] && [ "${WASM_OPT:-1}" != 0 ]; then
-    if command -v wasm-opt > /dev/null; then
-        # The features rustc's wasm32 target turns on, and the threaded build's atomics.
-        wasm-opt -O2 --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-simd \
-            --enable-sign-ext --enable-nontrapping-float-to-int --enable-reference-types \
-            --enable-multivalue "$wasm" -o "$wasm.opt"
-        mv "$wasm.opt" "$wasm"
-    else
-        echo "wasm-opt not found: the module is left as rustc made it (install binaryen)" >&2
-    fi
+rm -f "$dist/horizon-client.symbols"
+if [ "$wasm_opt" != 0 ]; then
+    # The features rustc's wasm32 target turns on, and the threaded build's atomics.
+    wasm-opt -O2 --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-simd \
+        --enable-sign-ext --enable-nontrapping-float-to-int --enable-reference-types \
+        --enable-multivalue "$wasm" -o "$wasm.opt" \
+        --symbolmap --pass-arg="symbolmap@$dist/horizon-client.symbols"
+    # The symbol map names the functions a panic's stack gives by number
+    # (wasm-function[n]); it stays beside the build, out of what is served.
+    mv "$wasm.opt" "$wasm"
+    phase "wasm-opt"
 fi
 cp web/index.html web/main.js web/audio.js web/worker.js web/sw.js "$dist/"
 
@@ -117,7 +156,57 @@ mods="${HORIZON_MODS-$(find web/mods -mindepth 1 -maxdepth 1 2>/dev/null | sort 
 content="$dist/fs/content.tar.gz"
 replaced="$dist/fs/content-replaced.txt"
 mkdir -p "$dist/fs"
+cache=""
+# What the root is built from (the key's files: the top of this file).
+content_key() {
+    python3 - "$resources/horizon-resources.json" "content cache 1 ${NATIVE_TOOLCHAIN:-$nightly} $native_mods" "$mods" \
+        $(for id in $native_mods; do echo "mods/$id"; done) <<'PY'
+import hashlib, os, sys
+from pathlib import Path
+manifest, setup, mods, natives = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4:]
+h = hashlib.sha256()
+def add(label, data):
+    h.update(f"{label}\0{len(data)}\0".encode())
+    h.update(data)
+def tree(folder, keep=lambda p: True):
+    folder = Path(folder)
+    for d, dirs, names in os.walk(folder):
+        dirs[:] = sorted(x for x in dirs if x not in ("target", "__pycache__", ".git"))
+        for n in sorted(names):
+            p = Path(d, n)
+            if keep(p):
+                add(f"{folder.name}/{p.relative_to(folder).as_posix()}", p.read_bytes())
+add("setup", setup.encode())
+add("resources", manifest.read_bytes() if manifest.exists() else b"")
+for folder in (f for f in mods.split(":") if f):
+    tree(folder)
+for crate in ("horizon-mods", "horizon-items", "horizon-protocol", "horizon-world", "horizon-core"):
+    add(crate, Path(f"crates/{crate}/Cargo.toml").read_bytes())
+    tree(f"crates/{crate}/src")
+    if Path(f"crates/{crate}/build.rs").exists():
+        add(crate + " build.rs", Path(f"crates/{crate}/build.rs").read_bytes())
+client = Path("crates/horizon-client/src")
+for p in sorted(client.glob("mod_content*.rs")) + [client / f for f in (
+        "content_identity.rs", "mod_api.rs", "game/mods.rs", "game/native_hooks.rs")]:
+    add(p.as_posix(), p.read_bytes())
+for folder in natives + ["web/game"]:
+    tree(folder)
+for f in ("web/content_root.py", "Cargo.toml", "Cargo.lock"):
+    add(f, Path(f).read_bytes())
+print(h.hexdigest()[:24])
+PY
+}
 if [ -n "$mods" ] && [ "${CONTENT_ROOT:-1}" != 0 ]; then
+    key="$(content_key)"
+    cache=".local/web-cache/content/$key"
+fi
+phase "content key"
+if [ -n "$cache" ] && [ "${CONTENT_CACHE:-1}" != 0 ] && [ -f "$cache/content.tar.gz" ]; then
+    echo "content root: reused from $cache"
+    cp "$cache/content.tar.gz" "$content"
+    if [ -f "$cache/content-replaced.txt" ]; then cp "$cache/content-replaced.txt" "$replaced"; else rm -f "$replaced"; fi
+    touch "$cache"
+elif [ -n "$cache" ]; then
     native=(cargo "+${NATIVE_TOOLCHAIN:-$nightly}" build --profile fast -p horizon-web-game
         --bin horizon-web-content --no-default-features)
     [ -n "$native_mods" ] && native+=(--features "$native_mods")
@@ -139,6 +228,18 @@ if [ -n "$mods" ] && [ "${CONTENT_ROOT:-1}" != 0 ]; then
             "$target_dir/fast/horizon-web-content" --resources "$here/$resources" | tail -n 1)" \
         && [ -f "$root/horizon-mod-content.stamp" ]; then
         python3 web/content_root.py "$root" "$resources" "$content" "${pairs[@]}"
+        # Kept for the next build with the same key, unless its files changed while it ran;
+        # the four last used stay.
+        if [ "$(content_key)" = "$key" ]; then
+            rm -rf "$cache" "$cache.new"
+            mkdir -p "$cache.new"
+            cp "$content" "$cache.new/"
+            [ -f "$replaced" ] && cp "$replaced" "$cache.new/"
+            mv "$cache.new" "$cache"
+            ls -dt "$(dirname "$cache")"/*/ | tail -n +5 | while read -r old; do rm -rf "$old"; done
+        else
+            echo "content root: not kept, its sources changed during the build" >&2
+        fi
     else
         echo "no content root built ahead: the page's game builds its own at each start" >&2
         rm -f "$content" "$replaced"
@@ -147,6 +248,7 @@ if [ -n "$mods" ] && [ "${CONTENT_ROOT:-1}" != 0 ]; then
 else
     rm -f "$content" "$replaced"
 fi
+phase "content root"
 # The resources' files that root replaces aren't downloaded up front (bundle.py): packed again
 # when that list changes.
 bundle=("$resources" "$dist/fs")
@@ -158,6 +260,7 @@ if [ ! -f "$dist/fs/boot.tar.gz" ] || [ "$resources/horizon-resources.json" -nt 
     python3 web/bundle.py "${bundle[@]}"
     echo "$replaced_sum" > "$dist/fs/boot-replaced.cksum"
 fi
+phase "bundle"
 # Content mods built into this game: each folder holding a horizon-mod.toml in
 # web/mods/ (or in HORIZON_MODS, separated by ':') goes beside the game as
 # native-content/<id>/, where the game finds its native mods' content, always on.
@@ -198,5 +301,6 @@ files = {rel: digest(rel) for rel in (
     "fs/manifest.txt", "fs/mods.tar.gz", "fs/content.tar.gz") if (dist / rel).exists()}
 (dist / "build.json").write_text(json.dumps(files) + "\n")
 PY
+phase "mods, hashes"
 ls -l "$dist/pkg"/*.wasm
 echo "Serve it with: python3 web/serve.py, then open http://localhost:8080"

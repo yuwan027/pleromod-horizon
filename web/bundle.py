@@ -26,7 +26,16 @@ from pathlib import Path
 
 # Fetched when first read instead of downloaded up front.
 LAZY_DIRS = ("worldgen", "biome-parameters")
-LAZY_FILES = ("horizon-sprites.cache",)
+LAZY_FILES = ()
+# Read at every start, though the content root replaces them or the game could rebuild
+# them: fetched when read, each would hold up the start by a request of its own, one
+# after another (horizon-sprites.cache rebuilt would take longer still).
+READ_AT_START = ("items.json", "horizon-sprites.cache")
+# The templates of features (not structures) that the world's features read as the game
+# starts: fossils, desert wells and springs, a few KB each.
+FEATURE_TEMPLATES = tuple(
+    f"worldgen/structure/minecraft/{name}/" for name in ("fossil", "desert_well", "spring")
+)
 # deprecated.json (the renamed keys) is read with every language at startup.
 # The web build starts in zh_cn, and ja_jp is its neighbour on pleromod.com: both
 # are read before the first frame, so they come with boot rather than lazily.
@@ -59,6 +68,8 @@ def dropped(rel: str) -> bool:
 
 def lazy(rel: str) -> bool:
     parts = rel.split("/")
+    if rel in READ_AT_START or rel.startswith(FEATURE_TEMPLATES):
+        return False
     if parts[0] in LAZY_DIRS or rel in LAZY_FILES:
         return True
     if parts[:3] == ["assets", "minecraft", "sounds"]:
@@ -81,7 +92,8 @@ def main() -> None:
             rel = path.relative_to(resources).as_posix()
             if dropped(rel):
                 continue
-            (rest if lazy(rel) or rel in replaced else boot).append((rel, path))
+            fetched = lazy(rel) or (rel in replaced and rel not in READ_AT_START)
+            (rest if fetched else boot).append((rel, path))
     boot.sort()
     rest.sort()
     with tarfile.open(out / "boot.tar.gz", "w:gz", format=tarfile.GNU_FORMAT, compresslevel=6) as tar:

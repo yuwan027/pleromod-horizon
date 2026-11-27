@@ -395,3 +395,11 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+## winit
+
+`third_party/winit` is [winit](https://github.com/rust-windowing/winit) 0.30.13 by the winit
+contributors. Its web event loop queues an event that arrives while it is handling another one
+(a browser call inside the handler that dispatches an event at once), as it already does for the
+events it is sent, instead of panicking on its `RefCell` ("RefCell already borrowed"), which
+stopped the browser game. It is licensed under Apache-2.0 (`LICENSE` in that folder).

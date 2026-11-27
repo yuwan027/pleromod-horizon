@@ -107,6 +107,15 @@ export function horizon_console(level, message) {
     else if (level === 2) console.warn(message);
     else console.log(message);
 }
+// A panic, with where the JavaScript and WebAssembly stack was (wasm-function[n] names a
+// function of the build's symbol map). On the page, the page hears of it too: the game
+// stops there.
+export function horizon_panicked(message) {
+    console.error(`${message}\n${new Error().stack}`);
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new CustomEvent("horizon-panicked", { detail: message }));
+    }
+}
 
 let wantLock = false;
 let lostLock = false;
@@ -239,6 +248,7 @@ extern "C" {
     fn horizon_shown();
     fn horizon_startup_trace() -> bool;
     fn horizon_console(level: u32, message: &str);
+    fn horizon_panicked(message: &str);
     fn horizon_pointer_lock(want: bool);
     fn horizon_pointer_lock_lost() -> bool;
     fn horizon_pointer_locked() -> bool;
@@ -312,7 +322,7 @@ pub fn horizon_take_changes() -> js_sys::Array {
 pub fn horizon_start(args: Vec<String>) {
     *ARGS.lock().unwrap_or_else(|e| e.into_inner()) = args;
     std::panic::set_hook(Box::new(|info| {
-        horizon_console(1, &format!("Horizon panicked: {info}"));
+        horizon_panicked(&format!("Horizon panicked: {info}"));
     }));
     crate::net::install();
     let start = START.lock().unwrap_or_else(|e| e.into_inner()).take();

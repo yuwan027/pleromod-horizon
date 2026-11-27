@@ -110,6 +110,9 @@ export function horizon_fetch_sync(url) {
             len: u64,
             pack: Option<Arc<str>>,
             origin: Option<Arc<str>>,
+            /// The query that names its content (`?v=<hash>`), after its URL:
+            /// the same path holds another file in another build.
+            version: Option<Arc<str>>,
         },
     }
 
@@ -224,12 +227,13 @@ export function horizon_fetch_sync(url) {
 
     /// Where a manifest file not fetched yet is fetched from.
     fn remote_url(vfs: &Vfs, key: &str) -> Option<String> {
-        if !matches!(vfs.nodes.get(key), Some(Node::Remote { .. })) {
-            return None;
-        }
+        let version = match vfs.nodes.get(key) {
+            Some(Node::Remote { version, .. }) => version.as_deref().unwrap_or(""),
+            _ => return None,
+        };
         let remote = crate::sync::lock(&REMOTE).unwrap_or_else(|e| e.into_inner());
         let rel = key.strip_prefix(&remote.0).unwrap_or(key);
-        Some(format!("{}{}", remote.1, rel.trim_start_matches('/')))
+        Some(format!("{}{}{version}", remote.1, rel.trim_start_matches('/')))
     }
 
     /// `path` from the root, `.` and `..` resolved, no trailing slash.
@@ -432,10 +436,14 @@ export function horizon_fetch_sync(url) {
             let mut fields = line.split('\t');
             let path = fields.next().unwrap_or(line);
             let len = fields.next().and_then(|l| l.parse().ok()).unwrap_or(0);
+            // A file fetched alone has its content's query (`?v=<hash>`); one
+            // fetched with its pack, the pack's address.
+            let (version, pack) = match fields.next() {
+                Some(v) if v.starts_with('?') => (Some(Arc::<str>::from(v)), None),
+                other => (None, other),
+            };
             // One shared name per pack.
-            let pack = fields
-                .next()
-                .map(|p| match packs.iter().find(|q| &***q == p) {
+            let pack = pack.map(|p| match packs.iter().find(|q| &***q == p) {
                     Some(q) => q.clone(),
                     None => {
                         packs.push(p.into());
@@ -450,6 +458,7 @@ export function horizon_fetch_sync(url) {
                         len,
                         pack,
                         origin: None,
+                        version,
                     },
                 );
             }
@@ -729,6 +738,7 @@ export function horizon_fetch_sync(url) {
                 // would be fetched again for the links still waiting.
                 pack: None,
                 origin: Some(ok.as_str().into()),
+                version: None,
             },
         };
         match parent_key(&lk).and_then(|p| vfs.nodes.get(p)) {

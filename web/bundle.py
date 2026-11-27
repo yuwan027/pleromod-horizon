@@ -4,8 +4,10 @@
 boot.tar.gz holds what the game reads before the title screen and for a
 world (everything but other languages, sounds, the world generator's bundle
 and caches the game rebuilds); manifest.txt lists the rest, which the game fetches
-from res/ the first time it reads a file. The world generator's folders are
-read together, hundreds of files when a world starts: each is also packed whole
+from res/ the first time it reads a file, at the address its line gives it: its
+path with the hash of its content (?v=), or the pack it comes in. The world
+generator's folders are read together, hundreds of files when a world starts:
+each is also packed whole
 (worldgen.tar.gz...), which the manifest names for its files, so the first read
 fetches all of them in one request.
 
@@ -124,7 +126,10 @@ def main() -> None:
     with open(out / "manifest.txt", "w") as manifest:
         for rel, path in rest:
             pack = packs.get(rel.split("/")[0]) if packed(rel) and rel not in replaced else None
-            manifest.write(f"{rel}\t{path.stat().st_size}" + (f"\t{pack}" if pack else "") + "\n")
+            # A file fetched alone is named by its content too (`?v=<hash>`): its path holds
+            # another file in another build, and the cache keeps each until it changes.
+            source = pack or f"?v={hashlib.sha256(path.read_bytes()).hexdigest()[:16]}"
+            manifest.write(f"{rel}\t{path.stat().st_size}\t{source}\n")
     res = out / "res"
     if res.is_symlink() or res.exists():
         res.unlink()
